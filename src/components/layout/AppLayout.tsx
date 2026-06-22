@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 
@@ -18,10 +18,34 @@ function getSidebarMode(width: number): SidebarMode {
 }
 
 export function AppLayout() {
+  const location = useLocation();
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() =>
     typeof window === 'undefined' ? 'full' : getSidebarMode(window.innerWidth)
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+
+    return () => {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'auto';
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: 'auto',
+    });
+
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [location.pathname]);
 
   useEffect(() => {
     const handleResize = () => {
