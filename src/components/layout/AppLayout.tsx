@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -19,6 +19,7 @@ function getSidebarMode(width: number): SidebarMode {
 
 export function AppLayout() {
   const location = useLocation();
+  const contentScrollRef = useRef<HTMLElement | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() =>
     typeof window === 'undefined' ? 'full' : getSidebarMode(window.innerWidth)
   );
@@ -28,24 +29,44 @@ export function AppLayout() {
     if ('scrollRestoration' in window.history) {
       window.history.scrollRestoration = 'manual';
     }
-
-    return () => {
-      if ('scrollRestoration' in window.history) {
-        window.history.scrollRestoration = 'auto';
-      }
-    };
   }, []);
 
   useLayoutEffect(() => {
-    window.scrollTo({
+    const container = contentScrollRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    container.scrollTo({
       top: 0,
       left: 0,
       behavior: 'auto',
     });
 
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
+    container.scrollTop = 0;
   }, [location.pathname]);
+
+  useEffect(() => {
+    const reset = () => {
+      const container = contentScrollRef.current;
+
+      if (container) {
+        container.scrollTop = 0;
+        container.scrollLeft = 0;
+      }
+    };
+
+    reset();
+
+    const frameId = window.requestAnimationFrame(reset);
+    const timeoutId = window.setTimeout(reset, 100);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -81,7 +102,7 @@ export function AppLayout() {
   const showMobileSidebar = sidebarMode === 'hidden' && mobileSidebarOpen;
 
   return (
-    <div className="so9-shell so9-app-gradient min-h-screen bg-background text-foreground">
+    <div className="so9-shell so9-app-gradient bg-background text-foreground">
       {sidebarMode === 'hidden' ? (
         <>
           <Sidebar mobileOpen={mobileSidebarOpen} onCloseMobile={() => setMobileSidebarOpen(false)} />
@@ -104,7 +125,7 @@ export function AppLayout() {
           showMenuButton={sidebarMode !== 'full'}
           isSidebarOpen={mobileSidebarOpen}
         />
-        <main className="so9-content">
+        <main ref={contentScrollRef} className="so9-content">
           <div className="mx-auto w-full max-w-[1480px]">
             <div className="space-y-6">
               <div className="so9-subtle-panel hidden xl:block">

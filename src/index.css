@@ -56,16 +56,24 @@
     font-size: 14px;
   }
 
+  html,
+  body,
+  #root {
+    height: 100%;
+    min-height: 0;
+  }
+
+  html,
+  body {
+    overflow: hidden;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
     background-image:
       radial-gradient(circle at top left, rgba(31, 94, 255, 0.08), transparent 28%),
       linear-gradient(180deg, #f8fbff 0%, #f3f6fb 48%, #eef3f9 100%);
-  }
-
-  #root {
-    min-height: 100vh;
   }
 
   button:focus-visible,
@@ -78,7 +86,10 @@
 
 @layer components {
   .so9-shell {
-    @apply min-h-screen bg-transparent text-foreground;
+    @apply bg-transparent text-foreground;
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .so9-app-gradient {
@@ -100,7 +111,10 @@
   }
 
   .so9-main {
-    @apply min-h-screen pl-[270px];
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+    padding-left: 270px;
   }
 
   .so9-topbar {
@@ -108,7 +122,12 @@
   }
 
   .so9-content {
-    @apply min-h-screen px-4 pb-10 pt-[102px] md:px-6 lg:px-8;
+    @apply px-4 pb-10 pt-[102px] md:px-6 lg:px-8;
+    height: 100vh;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overflow-anchor: none;
   }
 
   .so9-page {
@@ -598,17 +617,19 @@
     }
   }
 
-  @media (max-width: 768px) {
-    .so9-sidebar {
-      @apply w-[72px] px-2;
-    }
-
+  @media (max-width: 959px) {
     .so9-main {
-      @apply pl-[72px];
+      padding-left: 0;
     }
 
     .so9-topbar {
-      left: 72px;
+      left: 0;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .so9-sidebar {
+      @apply w-[72px] px-2;
     }
 
     .so9-page-title {
