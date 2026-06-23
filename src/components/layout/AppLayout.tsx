@@ -32,41 +32,28 @@ export function AppLayout() {
   }, []);
 
   useLayoutEffect(() => {
-    const container = contentScrollRef.current;
-
-    if (!container) {
-      return;
-    }
-
-    container.scrollTo({
+    window.scrollTo({
       top: 0,
       left: 0,
       behavior: 'auto',
     });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
 
-    container.scrollTop = 0;
+    const content = contentScrollRef.current;
+
+    if (!content) {
+      return;
+    }
+
+    content.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: 'auto',
+    });
+    content.scrollTop = 0;
+    content.scrollLeft = 0;
   }, [location.pathname]);
-
-  useEffect(() => {
-    const reset = () => {
-      const container = contentScrollRef.current;
-
-      if (container) {
-        container.scrollTop = 0;
-        container.scrollLeft = 0;
-      }
-    };
-
-    reset();
-
-    const frameId = window.requestAnimationFrame(reset);
-    const timeoutId = window.setTimeout(reset, 100);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.clearTimeout(timeoutId);
-    };
-  }, []);
 
   useEffect(() => {
     const handleResize = () => {

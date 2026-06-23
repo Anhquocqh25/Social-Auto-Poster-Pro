@@ -59,13 +59,17 @@
   html,
   body,
   #root {
+    width: 100%;
     height: 100%;
+    min-width: 0;
     min-height: 0;
+    margin: 0;
+    overflow: hidden;
   }
 
-  html,
-  body {
-    overflow: hidden;
+  #root {
+    position: fixed;
+    inset: 0;
   }
 
   body {
@@ -87,7 +91,9 @@
 @layer components {
   .so9-shell {
     @apply bg-transparent text-foreground;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
   }
@@ -99,7 +105,7 @@
   }
 
   .so9-sidebar {
-    @apply fixed left-0 top-0 z-30 flex h-screen w-[270px] flex-col border-r border-white/10 bg-[#0b1220] text-white shadow-[0_20px_60px_rgba(11,18,32,0.45)];
+    @apply fixed inset-y-0 left-0 z-30 flex h-full w-[292px] flex-col border-r border-white/10 bg-[#0b1220] text-white shadow-[0_20px_60px_rgba(11,18,32,0.45)];
   }
 
   .so9-sidebar-link {
@@ -111,19 +117,32 @@
   }
 
   .so9-main {
-    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    width: auto;
+    height: 100%;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
-    padding-left: 270px;
+    padding-left: 292px;
   }
 
   .so9-topbar {
-    @apply fixed left-[270px] right-0 top-0 z-20 flex min-h-[76px] items-center justify-between border-b border-white/70 bg-[rgba(255,255,255,0.85)] px-4 backdrop-blur-xl md:px-6;
+    @apply z-20 flex min-h-[76px] items-center justify-between border-b border-white/70 bg-[rgba(255,255,255,0.85)] px-4 backdrop-blur-xl md:px-6;
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
   }
 
   .so9-content {
-    @apply px-4 pb-10 pt-[102px] md:px-6 lg:px-8;
-    height: 100vh;
+    @apply px-4 pt-6 pb-10 md:px-6 lg:px-8;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
@@ -609,11 +628,7 @@
     }
 
     .so9-main {
-      @apply pl-[88px];
-    }
-
-    .so9-topbar {
-      left: 88px;
+      padding-left: 88px;
     }
   }
 
@@ -621,23 +636,15 @@
     .so9-main {
       padding-left: 0;
     }
-
-    .so9-topbar {
-      left: 0;
-    }
   }
 
   @media (max-width: 768px) {
-    .so9-sidebar {
-      @apply w-[72px] px-2;
-    }
-
     .so9-page-title {
       @apply text-[24px];
     }
 
     .so9-content {
-      @apply px-3 pt-[96px];
+      @apply px-3 pt-6;
     }
 
     .so9-modal-shell {
