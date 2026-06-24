@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -20,18 +20,13 @@ function getSidebarMode(width: number): SidebarMode {
 export function AppLayout() {
   const location = useLocation();
   const contentScrollRef = useRef<HTMLElement | null>(null);
+  const scrollResetFrameRef = useRef<number | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() =>
     typeof window === 'undefined' ? 'full' : getSidebarMode(window.innerWidth)
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  useEffect(() => {
-    if ('scrollRestoration' in window.history) {
-      window.history.scrollRestoration = 'manual';
-    }
-  }, []);
-
-  useLayoutEffect(() => {
+  const resetMainScrollPosition = useCallback(() => {
     window.scrollTo({
       top: 0,
       left: 0,
@@ -53,7 +48,33 @@ export function AppLayout() {
     });
     content.scrollTop = 0;
     content.scrollLeft = 0;
-  }, [location.pathname]);
+  }, []);
+
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    resetMainScrollPosition();
+
+    if (scrollResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollResetFrameRef.current);
+    }
+
+    scrollResetFrameRef.current = window.requestAnimationFrame(() => {
+      resetMainScrollPosition();
+      scrollResetFrameRef.current = null;
+    });
+
+    return () => {
+      if (scrollResetFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollResetFrameRef.current);
+        scrollResetFrameRef.current = null;
+      }
+    };
+  }, [location.key, resetMainScrollPosition]);
 
   useEffect(() => {
     const handleResize = () => {
