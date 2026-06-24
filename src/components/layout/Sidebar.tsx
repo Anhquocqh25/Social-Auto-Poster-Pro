@@ -144,7 +144,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'so9-sidebar fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:sticky',
+        'so9-sidebar fixed inset-y-0 left-0 z-40 flex transition-transform duration-200',
         compact ? 'w-[94px]' : 'w-[292px]',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
         'md:translate-x-0'
