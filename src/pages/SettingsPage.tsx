@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { UpdateStateSnapshot } from '@/types/electron';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -28,6 +29,25 @@ type SaveMessage = {
   text: string;
 };
 
+const fallbackUpdateState: UpdateStateSnapshot = {
+  status: 'idle',
+  checking: false,
+  updateAvailable: false,
+  updateDownloaded: false,
+  version: null,
+  currentVersion: '0.1.0',
+  releaseName: null,
+  releaseDate: null,
+  downloadedFile: null,
+  progress: null,
+  message: null,
+  errorMessage: null,
+  canCheckForUpdates: false,
+  canDownloadUpdate: false,
+  canQuitAndInstall: false,
+  lastCheckedAt: null,
+};
+
 export function SettingsPage() {
   const navigate = useNavigate();
   const { theme, setTheme } = useThemeStore();
@@ -40,6 +60,8 @@ export function SettingsPage() {
   const [realPublishingEnabled, setRealPublishingEnabled] = useState(false);
   const [flagSourceLabel, setFlagSourceLabel] = useState<string>('.env.local');
   const [appVersion, setAppVersion] = useState<string>('0.1.0');
+  const [updateState, setUpdateState] = useState<UpdateStateSnapshot>(fallbackUpdateState);
+  const [updateActionError, setUpdateActionError] = useState<string | null>(null);
 
   const [schedulerSettings, setSchedulerSettings] = useState<SchedulerSettingsForm>({
     autoPostingEnabled: true,
@@ -63,9 +85,10 @@ export function SettingsPage() {
       setStatusMessage(null);
       setSaveMessage(null);
 
-      const [settings, connectionStatus] = await Promise.all([
+      const [settings, connectionStatus, updaterState] = await Promise.all([
         electronAPI.settings.getSchedulerSettings(),
         electronAPI.accounts.getConnectionStatus(),
+        electronAPI.updater.getState(),
       ]);
 
       setSchedulerSettings((prev) => ({
@@ -80,7 +103,12 @@ export function SettingsPage() {
       }));
       setRealPublishingEnabled(Boolean(connectionStatus.facebook.realPublishingEnabled));
       setFlagSourceLabel(connectionStatus.facebook.realPublishingFlagSource || '.env.local');
-      setAppVersion(connectionStatus.facebook.graphApiVersion ? `0.1.0 · Graph ${connectionStatus.facebook.graphApiVersion}` : '0.1.0');
+      setAppVersion(
+        connectionStatus.facebook.graphApiVersion
+          ? `${updaterState.currentVersion} · Graph ${connectionStatus.facebook.graphApiVersion}`
+          : updaterState.currentVersion
+      );
+      setUpdateState(updaterState);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : (language === 'vi' ? 'Không thể tải cài đặt scheduler' : 'Failed to load scheduler settings'));
     } finally {
@@ -91,6 +119,18 @@ export function SettingsPage() {
   useEffect(() => {
     void loadSchedulerSettings();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = electronAPI.updater.onStateChanged((nextState) => {
+      setUpdateState(nextState);
+      setAppVersion((currentValue) => {
+        const graphSuffix = currentValue.includes('· Graph') ? currentValue.slice(currentValue.indexOf('· Graph')) : '';
+        return graphSuffix ? `${nextState.currentVersion} ${graphSuffix}` : nextState.currentVersion;
+      });
+    });
+
+    return unsubscribe;
+  }, [electronAPI]);
 
   const handleSaveSchedulerSettings = async () => {
     try {
@@ -162,6 +202,61 @@ export function SettingsPage() {
       setSaving(false);
     }
   };
+
+  const handleCheckForUpdates = async () => {
+    try {
+      setUpdateActionError(null);
+      const nextState = await electronAPI.updater.checkForUpdates();
+      setUpdateState(nextState);
+    } catch (error) {
+      setUpdateActionError(error instanceof Error ? error.message : 'Failed to check for updates');
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    try {
+      setUpdateActionError(null);
+      const nextState = await electronAPI.updater.downloadUpdate();
+      setUpdateState(nextState);
+    } catch (error) {
+      setUpdateActionError(error instanceof Error ? error.message : 'Failed to download update');
+    }
+  };
+
+  const handleQuitAndInstall = async () => {
+    try {
+      setUpdateActionError(null);
+      const result = await electronAPI.updater.quitAndInstall();
+      if (!result.accepted) {
+        setUpdateActionError(
+          language === 'vi'
+            ? 'Bản cập nhật chưa sẵn sàng để cài đặt.'
+            : 'The update is not ready to install yet.'
+        );
+      }
+    } catch (error) {
+      setUpdateActionError(error instanceof Error ? error.message : 'Failed to restart and install update');
+    }
+  };
+
+  const updateStatusLabel = useMemo(() => {
+    switch (updateState.status) {
+      case 'checking':
+        return language === 'vi' ? 'Đang kiểm tra cập nhật' : 'Checking for updates';
+      case 'available':
+        return language === 'vi' ? 'Có bản cập nhật mới' : 'Update available';
+      case 'not-available':
+        return language === 'vi' ? 'Đang dùng bản mới nhất' : 'Up to date';
+      case 'downloading':
+        return language === 'vi' ? 'Đang tải cập nhật' : 'Downloading update';
+      case 'downloaded':
+        return language === 'vi' ? 'Sẵn sàng cài đặt' : 'Ready to install';
+      case 'error':
+        return language === 'vi' ? 'Cập nhật gặp lỗi' : 'Update error';
+      default:
+        return language === 'vi' ? 'Chưa kiểm tra' : 'Not checked yet';
+    }
+  }, [language, updateState.status]);
 
   const safeModeTitle = useMemo(() => {
     if (realPublishingEnabled) {
@@ -338,6 +433,7 @@ export function SettingsPage() {
       <Tabs defaultValue="general" className="space-y-4">
         <TabsList className="flex w-full flex-wrap justify-start gap-2 rounded-[20px] bg-transparent p-0">
           <TabsTrigger value="general">{language === 'vi' ? 'Chung' : 'General'}</TabsTrigger>
+          <TabsTrigger value="updates">{language === 'vi' ? 'Cập nhật' : 'Updates'}</TabsTrigger>
           <TabsTrigger value="scheduler">{language === 'vi' ? 'Scheduler' : 'Scheduler'}</TabsTrigger>
           <TabsTrigger value="notifications">{language === 'vi' ? 'Thông báo' : 'Notifications'}</TabsTrigger>
           <TabsTrigger value="accounts">{language === 'vi' ? 'Tài khoản' : 'Accounts'}</TabsTrigger>
@@ -414,6 +510,116 @@ export function SettingsPage() {
                     {language === 'vi'
                       ? 'Nên sao lưu thư mục project và cơ sở dữ liệu SQLite trước các phiên kiểm thử lớn hoặc trước khi chạy các bước xác minh runtime. Dùng thư mục _backups để lưu snapshot theo phase.'
                       : 'Back up the project folder and SQLite database before major test sessions or runtime verification runs. Use the _backups folder to keep phase-based snapshots.'}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="updates" className="space-y-4">
+          <Card className="so9-flat-card">
+            <CardHeader className="border-b border-[#e8eef8]">
+              <CardTitle>{language === 'vi' ? 'Windows auto-update' : 'Windows auto-update'}</CardTitle>
+              <CardDescription>
+                {language === 'vi'
+                  ? 'Kiểm tra GitHub Releases, tải bản NSIS mới và khởi động lại để cài đặt.'
+                  : 'Check GitHub Releases, download the latest NSIS build, and restart to install it.'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6 pt-5">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <div className="so9-surface p-4">
+                  <p className="text-sm font-semibold text-[#17233b]">{language === 'vi' ? 'Phiên bản hiện tại' : 'Current version'}</p>
+                  <p className="mt-2 text-sm text-[#62728b]">{updateState.currentVersion}</p>
+                </div>
+                <div className="so9-surface p-4">
+                  <p className="text-sm font-semibold text-[#17233b]">{language === 'vi' ? 'Trạng thái cập nhật' : 'Update status'}</p>
+                  <p className="mt-2 text-sm text-[#62728b]">{updateStatusLabel}</p>
+                </div>
+                <div className="so9-surface p-4">
+                  <p className="text-sm font-semibold text-[#17233b]">{language === 'vi' ? 'Bản phát hành mới' : 'Latest release'}</p>
+                  <p className="mt-2 text-sm text-[#62728b]">{updateState.version ?? (language === 'vi' ? 'Chưa có dữ liệu' : 'No release detected yet')}</p>
+                </div>
+              </div>
+
+              <div className="so9-info-note">
+                <p className="font-semibold">
+                  {language === 'vi' ? 'Luồng cập nhật' : 'Update flow'}
+                </p>
+                <p className="mt-1">
+                  {language === 'vi'
+                    ? '1) Kiểm tra cập nhật → 2) Tải bản mới → 3) Khởi động lại và cài đặt. Tính năng này chỉ khả dụng trên bản Windows NSIS phát hành qua GitHub Releases.'
+                    : '1) Check for updates → 2) Download update → 3) Restart and install. This flow is only available in Windows NSIS releases published through GitHub Releases.'}
+                </p>
+              </div>
+
+              {(updateState.message || updateState.errorMessage || updateActionError) && (
+                <Card className={updateState.status === 'error' || updateActionError ? 'so9-banner so9-banner-danger border-0 shadow-none' : 'so9-banner so9-banner-success border-0 shadow-none'}>
+                  <CardContent className="pt-6">
+                    <p className="text-sm">
+                      {updateActionError ?? updateState.errorMessage ?? updateState.message}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {updateState.progress && (
+                <div className="so9-surface p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-[#17233b]">
+                      {language === 'vi' ? 'Tiến độ tải' : 'Download progress'}
+                    </p>
+                    <Badge variant="secondary">{updateState.progress.percent.toFixed(1)}%</Badge>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e8eef8]">
+                    <div
+                      className="h-full rounded-full bg-[#1f5eff] transition-all"
+                      style={{ width: `${Math.max(0, Math.min(100, updateState.progress.percent))}%` }}
+                    />
+                  </div>
+                  <p className="mt-3 text-sm text-[#62728b]">
+                    {language === 'vi'
+                      ? `${Math.round(updateState.progress.transferred / 1024 / 1024)} MB / ${Math.round(updateState.progress.total / 1024 / 1024)} MB`
+                      : `${Math.round(updateState.progress.transferred / 1024 / 1024)} MB / ${Math.round(updateState.progress.total / 1024 / 1024)} MB`}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  onClick={handleCheckForUpdates}
+                  disabled={!updateState.canCheckForUpdates}
+                >
+                  {language === 'vi' ? 'Kiểm tra cập nhật' : 'Check for updates'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadUpdate}
+                  disabled={!updateState.canDownloadUpdate}
+                >
+                  {language === 'vi' ? 'Tải bản cập nhật' : 'Download update'}
+                </Button>
+                <Button
+                  variant="default"
+                  onClick={handleQuitAndInstall}
+                  disabled={!updateState.canQuitAndInstall}
+                >
+                  {language === 'vi' ? 'Khởi động lại và cài đặt' : 'Restart and install'}
+                </Button>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="so9-surface p-4">
+                  <p className="text-sm font-semibold text-[#17233b]">{language === 'vi' ? 'Lần kiểm tra gần nhất' : 'Last checked'}</p>
+                  <p className="mt-2 text-sm text-[#62728b]">
+                    {updateState.lastCheckedAt ? new Date(updateState.lastCheckedAt).toLocaleString() : (language === 'vi' ? 'Chưa kiểm tra' : 'Not checked yet')}
+                  </p>
+                </div>
+                <div className="so9-surface p-4">
+                  <p className="text-sm font-semibold text-[#17233b]">{language === 'vi' ? 'Ngày phát hành' : 'Release date'}</p>
+                  <p className="mt-2 text-sm text-[#62728b]">
+                    {updateState.releaseDate ? new Date(updateState.releaseDate).toLocaleString() : (language === 'vi' ? 'Chưa có dữ liệu' : 'No release metadata yet')}
                   </p>
                 </div>
               </div>

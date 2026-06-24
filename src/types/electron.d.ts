@@ -441,6 +441,41 @@ export interface PickMediaResult {
   validationError?: string;
 }
 
+export type UpdateAvailabilityStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateProgressSnapshot {
+  bytesPerSecond: number;
+  percent: number;
+  transferred: number;
+  total: number;
+}
+
+export interface UpdateStateSnapshot {
+  status: UpdateAvailabilityStatus;
+  checking: boolean;
+  updateAvailable: boolean;
+  updateDownloaded: boolean;
+  version: string | null;
+  currentVersion: string;
+  releaseName: string | null;
+  releaseDate: string | null;
+  downloadedFile: string | null;
+  progress: UpdateProgressSnapshot | null;
+  message: string | null;
+  errorMessage: string | null;
+  canCheckForUpdates: boolean;
+  canDownloadUpdate: boolean;
+  canQuitAndInstall: boolean;
+  lastCheckedAt: string | null;
+}
+
 export interface ElectronAPI {
   platform: string;
   diagnostics: {
@@ -459,6 +494,13 @@ export interface ElectronAPI {
     updateSchedulerSettings: (
       settings: Partial<SchedulerSettingsSnapshot> & { simulationMode?: boolean }
     ) => Promise<void>;
+  };
+  updater: {
+    getState: () => Promise<UpdateStateSnapshot>;
+    checkForUpdates: () => Promise<UpdateStateSnapshot>;
+    downloadUpdate: () => Promise<UpdateStateSnapshot>;
+    quitAndInstall: () => Promise<{ accepted: boolean }>;
+    onStateChanged: (listener: (state: UpdateStateSnapshot) => void) => () => void;
   };
   accounts: {
     list: () => Promise<AccountSnapshot[]>;

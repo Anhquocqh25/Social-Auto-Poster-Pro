@@ -9,6 +9,8 @@
     "dev:renderer": "vite",
     "dev:electron": "vite",
     "build": "tsc && vite build && electron-builder",
+    "build:app": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "electron:dev": "vite",
     "electron:build": "vite build && electron-builder",
@@ -29,6 +31,8 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
     "cors": "^2.8.6",
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.9",
     "express": "^5.2.1",
     "lucide-react": "^0.294.0",
     "node-cron": "^3.0.3",
@@ -94,10 +98,23 @@
         "to": "node_modules/@prisma/client"
       }
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Anhquocqh25",
+        "repo": "Social-Auto-Poster-Pro"
+      }
+    ],
     "win": {
       "target": [
-        "nsis"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Social-Auto-Poster-Pro-Setup-${version}.${ext}"
     },
     "linux": {
       "target": [
@@ -107,8 +124,10 @@
       "category": "Utility"
     },
     "nsis": {
-      "oneClick": true,
-      "perMachine": false
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
     }
   }
 }

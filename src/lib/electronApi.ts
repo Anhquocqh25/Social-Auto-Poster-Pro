@@ -12,6 +12,7 @@ import type {
   PostSnapshot,
   SchedulerSettingsSnapshot,
   SchedulerStatusSnapshot,
+  UpdateStateSnapshot,
 } from '@/types/electron';
 
 const missingNamespaceWarnings = new Set<string>();
@@ -116,6 +117,25 @@ const emptySchedulerSettings: SchedulerSettingsSnapshot = {
   simulationMode: true,
 };
 
+const emptyUpdateState: UpdateStateSnapshot = {
+  status: 'idle',
+  checking: false,
+  updateAvailable: false,
+  updateDownloaded: false,
+  version: null,
+  currentVersion: '0.1.0',
+  releaseName: null,
+  releaseDate: null,
+  downloadedFile: null,
+  progress: null,
+  message: 'Update service unavailable',
+  errorMessage: null,
+  canCheckForUpdates: false,
+  canDownloadUpdate: false,
+  canQuitAndInstall: false,
+  lastCheckedAt: null,
+};
+
 const emptyAccountConnectionStatus: AccountConnectionStatusSnapshot = {
   simulationMode: true,
   facebook: {
@@ -213,6 +233,42 @@ const unavailableSettings = {
   updateSchedulerSettings: async () => {
     logMissingNamespace('settings');
     throw unavailableError('settings');
+  },
+};
+
+const unavailableUpdater = {
+  getState: async (): Promise<UpdateStateSnapshot> => {
+    logMissingNamespace('updater');
+    return emptyUpdateState;
+  },
+  checkForUpdates: async (): Promise<UpdateStateSnapshot> => {
+    logMissingNamespace('updater');
+    return {
+      ...emptyUpdateState,
+      status: 'error',
+      message: unavailableError('updater').message,
+      errorMessage: unavailableError('updater').message,
+    };
+  },
+  downloadUpdate: async (): Promise<UpdateStateSnapshot> => {
+    logMissingNamespace('updater');
+    return {
+      ...emptyUpdateState,
+      status: 'error',
+      message: unavailableError('updater').message,
+      errorMessage: unavailableError('updater').message,
+    };
+  },
+  quitAndInstall: async () => {
+    logMissingNamespace('updater');
+    return {
+      accepted: false,
+    };
+  },
+  onStateChanged: (listener: (state: UpdateStateSnapshot) => void) => {
+    logMissingNamespace('updater');
+    listener(emptyUpdateState);
+    return () => undefined;
   },
 };
 
@@ -478,6 +534,7 @@ export function getElectronAPI(): ElectronAPI {
     diagnostics: raw?.diagnostics ?? unavailableDiagnostics,
     scheduler: raw?.scheduler ?? unavailableScheduler,
     settings: raw?.settings ?? unavailableSettings,
+    updater: raw?.updater ?? unavailableUpdater,
     accounts: raw?.accounts ?? unavailableAccounts,
     oauth: raw?.oauth ?? unavailableOAuth,
     bulkPublish: raw?.bulkPublish ?? unavailableBulkPublish,

@@ -26,6 +26,21 @@ const electronAPI = {
     }) => ipcRenderer.invoke('settings:updateSchedulerSettings', settings),
   },
 
+  updater: {
+    getState: () => ipcRenderer.invoke('updater:getState'),
+    checkForUpdates: () => ipcRenderer.invoke('updater:checkForUpdates'),
+    downloadUpdate: () => ipcRenderer.invoke('updater:downloadUpdate'),
+    quitAndInstall: () => ipcRenderer.invoke('updater:quitAndInstall'),
+    onStateChanged: (listener: (state: unknown) => void) => {
+      const channel = 'updater:state-changed';
+      const wrappedListener = (_event: unknown, state: unknown) => listener(state);
+      ipcRenderer.on(channel, wrappedListener);
+      return () => {
+        ipcRenderer.removeListener(channel, wrappedListener);
+      };
+    },
+  },
+
   accounts: {
     list: () => ipcRenderer.invoke('accounts:list'),
     listFacebookPageTargets: () => ipcRenderer.invoke('accounts:listFacebookPageTargets'),

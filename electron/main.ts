@@ -1,4 +1,6 @@
 import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron';
+import log from 'electron-log';
+import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import prisma from '../src/lib/prisma';
@@ -9,6 +11,7 @@ import type {
   BulkPublishEligibilityReason,
   BulkPublishPrepareRowPayload,
   BulkPublishPreparedRow,
+  UpdateStateSnapshot,
 } from '../src/types/electron';
 import { accountService } from '../src/services/AccountService';
 import { appSettingsService } from '../src/services/AppSettingsService';
@@ -79,6 +82,26 @@ let oauthWindow: BrowserWindow | null = null;
 const appStartTime = Date.now();
 const recentBulkPublishConfirmationTokens = new Set<string>();
 const CONTROLLED_REAL_BULK_TEST_MAX_POSTS = 2;
+
+let updaterInitialized = false;
+let updaterState: UpdateStateSnapshot = {
+  status: 'idle',
+  checking: false,
+  updateAvailable: false,
+  updateDownloaded: false,
+  version: null,
+  currentVersion: app.getVersion(),
+  releaseName: null,
+  releaseDate: null,
+  downloadedFile: null,
+  progress: null,
+  message: null,
+  errorMessage: null,
+  canCheckForUpdates: process.platform === 'win32',
+  canDownloadUpdate: false,
+  canQuitAndInstall: false,
+  lastCheckedAt: null,
+};
 
 app.disableHardwareAcceleration();
 
@@ -1299,6 +1322,134 @@ async function cleanupOAuthSessionByState(state?: string) {
   }
 }
 
+function emitUpdaterState() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updater:state-changed', updaterState);
+  }
+}
+
+function applyUpdaterState(patch: Partial<UpdateStateSnapshot>) {
+  updaterState = {
+    ...updaterState,
+    ...patch,
+    currentVersion: app.getVersion(),
+    canCheckForUpdates:
+      process.platform === 'win32' &&
+      !patch.checking &&
+      (patch.status ?? updaterState.status) !== 'downloading',
+    canDownloadUpdate:
+      process.platform === 'win32' &&
+      Boolean(patch.updateAvailable ?? updaterState.updateAvailable) &&
+      !(patch.updateDownloaded ?? updaterState.updateDownloaded) &&
+      (patch.status ?? updaterState.status) !== 'downloading',
+    canQuitAndInstall: process.platform === 'win32' && Boolean(patch.updateDownloaded ?? updaterState.updateDownloaded),
+  };
+  emitUpdaterState();
+}
+
+function initializeAutoUpdater() {
+  if (updaterInitialized) {
+    return;
+  }
+
+  updaterInitialized = true;
+
+  log.transports.file.level = 'info';
+  autoUpdater.logger = log;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    applyUpdaterState({
+      status: 'checking',
+      checking: true,
+      message: 'Checking for updates...',
+      errorMessage: null,
+      progress: null,
+      lastCheckedAt: new Date().toISOString(),
+    });
+  });
+
+  autoUpdater.on('update-available', (info: UpdateInfo) => {
+    applyUpdaterState({
+      status: 'available',
+      checking: false,
+      updateAvailable: true,
+      updateDownloaded: false,
+      version: info.version ?? null,
+      releaseName: info.releaseName ?? null,
+      releaseDate: info.releaseDate ?? null,
+      downloadedFile: null,
+      progress: null,
+      message: `Update ${info.version} is available.`,
+      errorMessage: null,
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info: UpdateInfo) => {
+    applyUpdaterState({
+      status: 'not-available',
+      checking: false,
+      updateAvailable: false,
+      updateDownloaded: false,
+      version: info.version ?? null,
+      releaseName: info.releaseName ?? null,
+      releaseDate: info.releaseDate ?? null,
+      downloadedFile: null,
+      progress: null,
+      message: 'You are using the latest version.',
+      errorMessage: null,
+    });
+  });
+
+  autoUpdater.on('download-progress', (progress: ProgressInfo) => {
+    applyUpdaterState({
+      status: 'downloading',
+      checking: false,
+      progress: {
+        bytesPerSecond: progress.bytesPerSecond,
+        percent: progress.percent,
+        transferred: progress.transferred,
+        total: progress.total,
+      },
+      message: `Downloading update... ${progress.percent.toFixed(1)}%`,
+      errorMessage: null,
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
+    const downloadedFile = Array.isArray(info.files) && info.files.length > 0 ? info.files[0]?.url ?? null : null;
+    applyUpdaterState({
+      status: 'downloaded',
+      checking: false,
+      updateAvailable: true,
+      updateDownloaded: true,
+      version: info.version ?? null,
+      releaseName: info.releaseName ?? null,
+      releaseDate: info.releaseDate ?? null,
+      downloadedFile,
+      progress: {
+        bytesPerSecond: 0,
+        percent: 100,
+        transferred: updaterState.progress?.total ?? 0,
+        total: updaterState.progress?.total ?? 0,
+      },
+      message: 'Update downloaded. Restart to install.',
+      errorMessage: null,
+    });
+  });
+
+  autoUpdater.on('error', (error: Error) => {
+    applyUpdaterState({
+      status: 'error',
+      checking: false,
+      message: 'Update failed.',
+      errorMessage: error.message,
+    });
+  });
+}
+
 const createWindow = () => {
   const isDev = !!process.env.VITE_DEV_SERVER_URL;
   const preloadPath = getPreloadPath();
@@ -1340,6 +1491,7 @@ const createWindow = () => {
 
   mainWindow.webContents.on('did-finish-load', () => {
     if (mainWindow) {
+      emitUpdaterState();
       void runAccountsUiProbe(mainWindow);
     }
   });
@@ -3590,9 +3742,62 @@ function registerIpcHandlers() {
     }
     return false;
   });
+
+  ipcMain.handle('updater:getState', async () => updaterState);
+
+  ipcMain.handle('updater:checkForUpdates', async () => {
+    if (process.platform !== 'win32') {
+      applyUpdaterState({
+        status: 'error',
+        checking: false,
+        message: 'Windows auto-update is only available on Windows NSIS builds.',
+        errorMessage: 'unsupported_platform',
+      });
+      return updaterState;
+    }
+
+    initializeAutoUpdater();
+    await autoUpdater.checkForUpdates();
+    return updaterState;
+  });
+
+  ipcMain.handle('updater:downloadUpdate', async () => {
+    if (process.platform !== 'win32') {
+      applyUpdaterState({
+        status: 'error',
+        checking: false,
+        message: 'Windows auto-update is only available on Windows NSIS builds.',
+        errorMessage: 'unsupported_platform',
+      });
+      return updaterState;
+    }
+
+    initializeAutoUpdater();
+    applyUpdaterState({
+      status: 'downloading',
+      checking: false,
+      message: 'Preparing update download...',
+      errorMessage: null,
+    });
+    await autoUpdater.downloadUpdate();
+    return updaterState;
+  });
+
+  ipcMain.handle('updater:quitAndInstall', async () => {
+    if (process.platform !== 'win32' || !updaterState.updateDownloaded) {
+      return { accepted: false };
+    }
+
+    setImmediate(() => {
+      autoUpdater.quitAndInstall(false, true);
+    });
+
+    return { accepted: true };
+  });
 }
 
 app.whenReady().then(async () => {
+  initializeAutoUpdater();
   registerIpcHandlers();
   createWindow();
 
