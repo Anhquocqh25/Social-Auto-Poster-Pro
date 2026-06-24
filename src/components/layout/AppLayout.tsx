@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { RefCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -74,7 +75,26 @@ export function AppLayout() {
         scrollResetFrameRef.current = null;
       }
     };
-  }, [location.key, resetMainScrollPosition]);
+  }, [location.pathname, resetMainScrollPosition]);
+
+  const setContentScrollRef = useCallback<RefCallback<HTMLElement>>(
+    (node) => {
+      contentScrollRef.current = node;
+
+      if (!node) {
+        return;
+      }
+
+      node.scrollTo({
+        top: 0,
+        left: 0,
+        behavior: 'auto',
+      });
+      node.scrollTop = 0;
+      node.scrollLeft = 0;
+    },
+    []
+  );
 
   useEffect(() => {
     const handleResize = () => {
@@ -133,7 +153,7 @@ export function AppLayout() {
           showMenuButton={sidebarMode !== 'full'}
           isSidebarOpen={mobileSidebarOpen}
         />
-        <main ref={contentScrollRef} className="so9-content">
+        <main ref={setContentScrollRef} className="so9-content">
           <div className="mx-auto w-full max-w-[1480px]">
             <div className="space-y-6">
               <div className="so9-subtle-panel hidden xl:block">
