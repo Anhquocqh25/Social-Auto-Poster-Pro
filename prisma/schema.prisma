@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
 }
 
 model Account {
@@ -19,12 +19,12 @@ model Account {
   status          String   @default("active") // 'active' | 'expired' | 'error'
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
+
   postTargets     PostTarget[]
   publishJobs     PublishJob[]
   platformToken   PlatformToken?
   platformSettings PlatformSetting[]
-  
+
   @@unique([platform, accountId])
   @@index([platform])
   @@index([status])
@@ -54,10 +54,10 @@ model Post {
   lockedBy        String?  // process identifier
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
+
   postTargets     PostTarget[]
   publishJobs     PublishJob[]
-  
+
   @@index([status])
   @@index([scheduledAt])
   @@index([lockedAt])
@@ -72,10 +72,10 @@ model PostTarget {
   errorMessage    String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
+
   post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  
+
   @@unique([postId, accountId])
   @@index([status])
 }
@@ -88,7 +88,7 @@ model MediaLibrary {
   mimeType      String
   thumbnailPath String?
   createdAt     DateTime @default(now())
-  
+
   @@index([createdAt])
 }
 
@@ -98,7 +98,7 @@ model Log {
   message   String
   data      String?  // JSON string
   createdAt DateTime @default(now())
-  
+
   @@index([level])
   @@index([createdAt])
 }
@@ -117,7 +117,7 @@ model OAuthSession {
   redirectUri   String
   createdAt     DateTime @default(now())
   expiresAt     DateTime
-  
+
   @@index([state])
   @@index([expiresAt])
 }
@@ -133,9 +133,9 @@ model PlatformToken {
   expiresAt       DateTime?
   lastRefreshed   DateTime?
   refreshCount    Int      @default(0)
-  
+
   account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  
+
   @@index([accountId])
   @@index([expiresAt])
 }
@@ -147,9 +147,9 @@ model PlatformSetting {
   settingValue String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+
   account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  
+
   @@unique([accountId, settingKey])
   @@index([accountId])
 }
@@ -170,11 +170,11 @@ model PublishJob {
   errorMessage    String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
+
   post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   attempts        PublishAttempt[]
-  
+
   @@index([status])
   @@index([nextRetryAt])
   @@index([postId])
@@ -191,9 +191,9 @@ model PublishAttempt {
   errorCode       String?
   errorMessage    String?
   responseData    String?  // JSON sanitized response
-  
+
   job             PublishJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  
+
   @@index([jobId])
   @@index([status])
 }
@@ -204,7 +204,7 @@ model SchedulerEvent {
   message         String
   data            String?  // JSON data
   createdAt       DateTime @default(now())
-  
+
   @@index([eventType])
   @@index([createdAt])
 }
@@ -218,7 +218,7 @@ model Notification {
   relatedJobId    Int?
   isRead          Boolean  @default(false)
   createdAt       DateTime @default(now())
-  
+
   @@index([isRead])
   @@index([createdAt])
   @@index([type])

@@ -2,22 +2,25 @@
   "name": "social-auto-poster-pro",
   "version": "0.1.0",
   "description": "Desktop application for automated social media posting",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/bootstrap.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:renderer": "vite",
     "dev:electron": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build": "npm run prepare:runtime-db && tsc && vite build && electron-builder",
     "build:app": "tsc && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "electron:dev": "vite",
-    "electron:build": "vite build && electron-builder",
+    "electron:build": "npm run prepare:runtime-db && vite build && electron-builder",
+    "prepare:runtime-db": "node scripts/prepare-runtime-db.cjs",
+    "dist:win": "npm run prepare:runtime-db && npm run build:app && electron-builder --win nsis --x64",
+    "release:win": "npm run prepare:runtime-db && npm run build:app && electron-builder --win nsis --x64 --publish always",
     "db:reset:dev": "node scripts/dev-db-reset.cjs --yes",
     "db:seed:demo": "node scripts/dev-demo-seed.cjs",
     "demo:simulation": "npm run db:reset:dev && npm run db:seed:demo",
-    "postinstall": "prisma generate"
+    "postinstall": "node scripts/run-with-dev-db.cjs npx prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.7.1",
@@ -77,6 +80,7 @@
       "dist/**/*",
       "dist-electron/**/*",
       "prisma/**/*",
+      "!prisma/dev.db",
       "node_modules/@prisma/client/**/*",
       "node_modules/.prisma/client/**/*"
     ],
@@ -87,7 +91,15 @@
     "extraResources": [
       {
         "from": "prisma",
-        "to": "prisma"
+        "to": "prisma",
+        "filter": [
+          "**/*",
+          "!dev.db"
+        ]
+      },
+      {
+        "from": "build-resources/runtime-db",
+        "to": "runtime-db"
       },
       {
         "from": "node_modules/.prisma/client",

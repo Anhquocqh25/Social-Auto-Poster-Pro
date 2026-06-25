@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     electron([
       {
-        entry: 'electron/main.ts',
+        entry: 'electron/bootstrap.ts',
         onstart(options) {
           options.startup();
         },

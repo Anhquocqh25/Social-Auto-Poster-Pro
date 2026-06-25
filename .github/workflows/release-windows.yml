@@ -34,8 +34,11 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Prepare runtime database template
+        run: npm run prepare:runtime-db
+
       - name: Build and publish Windows release
-        run: npx electron-builder --win nsis --x64 --publish always
+        run: npm run release:win
 
       - name: Upload Windows release artifacts
         uses: actions/upload-artifact@v4

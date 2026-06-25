@@ -1,11 +1,8 @@
-import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
 import log from 'electron-log';
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import prisma from '../src/lib/prisma';
-import ScheduleService from '../src/services/ScheduleService';
-import PostService from '../src/services/PostService';
 import type {
   BulkPublishCreateJobsResult,
   BulkPublishEligibilityReason,
@@ -13,43 +10,19 @@ import type {
   BulkPublishPreparedRow,
   UpdateStateSnapshot,
 } from '../src/types/electron';
-import { accountService } from '../src/services/AccountService';
-import { appSettingsService } from '../src/services/AppSettingsService';
-import { notificationService } from '../src/services/NotificationService';
-import { accountConnectionService } from '../src/services/AccountConnectionService';
-import { OAuthService } from '../src/services/oauth/OAuthService';
 import { loadLocalEnv } from '../src/lib/loadLocalEnv';
-import { loadFacebookEnvConfig } from '../src/services/facebook/FacebookConfigService';
-import { facebookPublishReadinessService } from '../src/services/facebook/FacebookPublishReadinessService';
-import { publishJobService } from '../src/services/PublishJobService';
-import MediaService from '../src/services/MediaService';
-import { dialog } from 'electron';
 import fsSync from 'fs';
+import {
+  resolveRuntimeDatabaseContext,
+  showDatabaseInitializationError,
+  validateRuntimeDatabase,
+} from './database/runtimeDatabase';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const envLocalPath = path.resolve(projectRoot, '.env.local');
 const isDevRuntime = !!process.env.VITE_DEV_SERVER_URL;
-
-if (!isDevRuntime) {
-  const packagedPrismaDirCandidates = [
-    path.resolve(projectRoot, 'prisma'),
-    path.join(process.resourcesPath, 'prisma'),
-  ];
-
-  for (const candidate of packagedPrismaDirCandidates) {
-    try {
-      if (fsSync.existsSync(candidate) && fsSync.statSync(candidate).isDirectory()) {
-        process.chdir(candidate);
-        console.info('[env] production prisma cwd=%s', candidate);
-        break;
-      }
-    } catch {
-      // ignore invalid packaged path candidates such as ASAR virtual directories
-    }
-  }
-}
 
 const { loadedFiles: loadedEnvFiles, realPublishFlagSource } = loadLocalEnv(projectRoot);
 process.env.FACEBOOK_REAL_PUBLISH_FLAG_SOURCE = realPublishFlagSource;
@@ -83,6 +56,73 @@ const appStartTime = Date.now();
 const recentBulkPublishConfirmationTokens = new Set<string>();
 const CONTROLLED_REAL_BULK_TEST_MAX_POSTS = 2;
 
+let prisma!: typeof import('../src/lib/prisma').default;
+let disconnectPrisma!: typeof import('../src/lib/prisma').disconnectPrisma;
+let ScheduleService!: typeof import('../src/services/ScheduleService').default;
+let PostService!: typeof import('../src/services/PostService').default;
+let MediaService!: typeof import('../src/services/MediaService').default;
+let accountService!: typeof import('../src/services/AccountService').accountService;
+let appSettingsService!: typeof import('../src/services/AppSettingsService').appSettingsService;
+let notificationService!: typeof import('../src/services/NotificationService').notificationService;
+let accountConnectionService!: typeof import('../src/services/AccountConnectionService').accountConnectionService;
+let OAuthService!: typeof import('../src/services/oauth/OAuthService').OAuthService;
+let loadFacebookEnvConfig!: typeof import('../src/services/facebook/FacebookConfigService').loadFacebookEnvConfig;
+let facebookPublishReadinessService!: typeof import('../src/services/facebook/FacebookPublishReadinessService').facebookPublishReadinessService;
+let publishJobService!: typeof import('../src/services/PublishJobService').publishJobService;
+
+let runtimeModulesLoaded = false;
+
+async function loadRuntimeModules() {
+  if (runtimeModulesLoaded) {
+    return;
+  }
+
+  const [
+    prismaModule,
+    scheduleServiceModule,
+    postServiceModule,
+    mediaServiceModule,
+    accountServiceModule,
+    appSettingsServiceModule,
+    notificationServiceModule,
+    accountConnectionServiceModule,
+    oauthServiceModule,
+    facebookConfigServiceModule,
+    facebookPublishReadinessServiceModule,
+    publishJobServiceModule,
+  ] = await Promise.all([
+    import('../src/lib/prisma'),
+    import('../src/services/ScheduleService'),
+    import('../src/services/PostService'),
+    import('../src/services/MediaService'),
+    import('../src/services/AccountService'),
+    import('../src/services/AppSettingsService'),
+    import('../src/services/NotificationService'),
+    import('../src/services/AccountConnectionService'),
+    import('../src/services/oauth/OAuthService'),
+    import('../src/services/facebook/FacebookConfigService'),
+    import('../src/services/facebook/FacebookPublishReadinessService'),
+    import('../src/services/PublishJobService'),
+  ]);
+
+  prisma = prismaModule.default;
+  disconnectPrisma = prismaModule.disconnectPrisma;
+  ScheduleService = scheduleServiceModule.default;
+  PostService = postServiceModule.default;
+  MediaService = mediaServiceModule.default;
+  accountService = accountServiceModule.accountService;
+  appSettingsService = appSettingsServiceModule.appSettingsService;
+  notificationService = notificationServiceModule.notificationService;
+  accountConnectionService = accountConnectionServiceModule.accountConnectionService;
+  OAuthService = oauthServiceModule.OAuthService;
+  loadFacebookEnvConfig = facebookConfigServiceModule.loadFacebookEnvConfig;
+  facebookPublishReadinessService =
+    facebookPublishReadinessServiceModule.facebookPublishReadinessService;
+  publishJobService = publishJobServiceModule.publishJobService;
+
+  runtimeModulesLoaded = true;
+}
+
 let updaterInitialized = false;
 let updaterState: UpdateStateSnapshot = {
   status: 'idle',
@@ -102,8 +142,6 @@ let updaterState: UpdateStateSnapshot = {
   canQuitAndInstall: false,
   lastCheckedAt: null,
 };
-
-app.disableHardwareAcceleration();
 
 async function runAccountsUiProbe(window: BrowserWindow) {
   if (!process.env.FACEBOOK_UI_ASSERT_ON_START) {
@@ -3855,6 +3893,30 @@ function registerIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
+  const runtimeDatabaseContext = resolveRuntimeDatabaseContext(projectRoot);
+
+  try {
+    await loadRuntimeModules();
+
+    const runtimeDatabaseValidation = await validateRuntimeDatabase(
+      runtimeDatabaseContext,
+      prisma
+    );
+
+    console.info(
+      '[database] runtime validation complete',
+      JSON.stringify(runtimeDatabaseValidation, null, 2)
+    );
+  } catch (error) {
+    console.error(
+      '[database] runtime validation failed',
+      error instanceof Error ? error.message : error
+    );
+    showDatabaseInitializationError(error, runtimeDatabaseContext.databasePath);
+    app.exit(1);
+    return;
+  }
+
   initializeAutoUpdater();
   registerIpcHandlers();
   createWindow();
@@ -3908,6 +3970,8 @@ app.whenReady().then(async () => {
         facebookConfigValid: connectionStatus.facebook.valid,
         facebookAppIdMasked: connectionStatus.facebook.appIdMasked,
         realPublishingEnabled: connectionStatus.facebook.realPublishingEnabled,
+        databasePath: runtimeDatabaseContext.databasePath,
+        databaseMode: runtimeDatabaseContext.mode,
       },
       null,
       2
@@ -3925,6 +3989,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', async () => {
   await ScheduleService.stop();
+  await disconnectPrisma();
 });
 
 app.on('window-all-closed', () => {

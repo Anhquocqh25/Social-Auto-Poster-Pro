@@ -1,23 +1,14 @@
-# Project Paused
+# Active Task
 
-Current status: Phase 25 paused before final manual acceptance.
+ACTIVE TASK: Persistent per-Windows-user packaged SQLite database
 
-Completed:
-- Phase 24 UI/UX implementation
-- unified media composer
-- Connected Channels
-- Page avatars
-- local multiple-image and single-video workflows
-- Linux AppImage and snap packaging
-- controlled real-video provider evidence for post #29
-- safe mode restored to false
+Current status:
+- packaged Windows runtime database bootstrap and persistence verification in progress
+- development database remains at `<project>/prisma/dev.db`
+- production packaged database must persist per Windows user at `app.getPath('userData')`
 
-Remaining when development resumes:
-- full manual UI acceptance
-- PUBLISH VIDEO modal dry-run evidence
-- external Facebook verification for post #29
-- final packaged-app interactive acceptance
-- final Phase 25 PASS decision
-
-Next task:
-Resume Phase 25 — Final Acceptance, Real Video Verification & Personal Release
+Current objective:
+- create and verify a persistent SQLite database for each Windows user
+- initialize the full schema on first launch
+- preserve existing user data across restart, rebuild, update, and reinstall
+- prevent any Prisma initialization before packaged `DATABASE_URL` is configured
