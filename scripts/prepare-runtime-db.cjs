@@ -28,7 +28,44 @@ const REQUIRED_ZERO_DATA_TABLES = [
   'Notification',
 ];
 
-const CURRENT_DATABASE_SCHEMA_VERSION = 1;
+const REQUIRED_POST_TARGET_COLUMNS = [
+  'id',
+  'postId',
+  'accountId',
+  'platform',
+  'targetType',
+  'pageId',
+  'pageName',
+  'sourceAccountName',
+  'platformPostId',
+  'status',
+  'errorMessage',
+  'createdAt',
+  'updatedAt',
+];
+
+const REQUIRED_PUBLISH_JOB_COLUMNS = [
+  'id',
+  'postId',
+  'accountId',
+  'platform',
+  'pageId',
+  'pageName',
+  'sourceAccountName',
+  'status',
+  'priority',
+  'retryCount',
+  'maxRetries',
+  'nextRetryAt',
+  'startedAt',
+  'completedAt',
+  'errorCode',
+  'errorMessage',
+  'createdAt',
+  'updatedAt',
+];
+
+const CURRENT_DATABASE_SCHEMA_VERSION = 2;
 
 const projectRoot = path.resolve(__dirname, '..');
 const outputDir = path.join(projectRoot, 'build-resources', 'runtime-db');
@@ -54,6 +91,21 @@ function exec(command, args, env) {
   }
 }
 
+async function getTableColumnNames(prisma, tableName) {
+  const rows = await prisma.$queryRawUnsafe(`PRAGMA table_info('${tableName}')`);
+  return new Set(rows.map((row) => row.name));
+}
+
+async function assertRequiredColumns(prisma, tableName, requiredColumns) {
+  const columns = await getTableColumnNames(prisma, tableName);
+
+  for (const column of requiredColumns) {
+    if (!columns.has(column)) {
+      throw new Error(`Required column missing from runtime template: ${tableName}.${column}`);
+    }
+  }
+}
+
 async function verifyRuntimeTemplate(databasePath) {
   process.env.DATABASE_URL = `file:${databasePath}`;
 
@@ -73,6 +125,9 @@ async function verifyRuntimeTemplate(databasePath) {
         throw new Error(`Required table missing from runtime template: ${table}`);
       }
     }
+
+    await assertRequiredColumns(prisma, 'PostTarget', REQUIRED_POST_TARGET_COLUMNS);
+    await assertRequiredColumns(prisma, 'PublishJob', REQUIRED_PUBLISH_JOB_COLUMNS);
 
     const zeroDataCounts = {
       Account: await prisma.account.count(),
@@ -112,6 +167,8 @@ async function verifyRuntimeTemplate(databasePath) {
     return {
       zeroDataCounts,
       userVersion,
+      postTargetColumns: Array.from(await getTableColumnNames(prisma, 'PostTarget')).sort(),
+      publishJobColumns: Array.from(await getTableColumnNames(prisma, 'PublishJob')).sort(),
     };
   } finally {
     await prisma.$disconnect();
@@ -143,6 +200,8 @@ async function main() {
         zeroDataTables: REQUIRED_ZERO_DATA_TABLES,
         zeroDataCounts: verification.zeroDataCounts,
         schemaVersion: verification.userVersion,
+        postTargetColumns: verification.postTargetColumns,
+        publishJobColumns: verification.publishJobColumns,
       },
       null,
       2

@@ -6,6 +6,8 @@ import {
   APP_DATABASE_FILENAME,
   CURRENT_DATABASE_SCHEMA_VERSION,
   REQUIRED_DATABASE_TABLES,
+  REQUIRED_POST_TARGET_COLUMNS,
+  REQUIRED_PUBLISH_JOB_COLUMNS,
   RUNTIME_TEMPLATE_FILENAME,
 } from './constants';
 import { runMigrations } from './runMigrations';
@@ -29,6 +31,15 @@ type PrismaClientLike = Pick<
   InstanceType<typeof prismaClientPackage.PrismaClient>,
   '$queryRawUnsafe' | '$executeRawUnsafe'
 >;
+
+type TableColumnInfoRow = {
+  cid: number;
+  name: string;
+  type: string;
+  notnull: number;
+  dflt_value: string | null;
+  pk: number;
+};
 
 function toPrismaSqliteUrl(filePath: string) {
   return `file:${filePath}`;
@@ -128,12 +139,29 @@ function getUserVersionValue(row: unknown) {
   }
 
   const record = row as Record<string, unknown>;
-  return Number(
-    record.user_version ??
-      record.userVersion ??
-      Object.values(record)[0] ??
-      0
+  return Number(record.user_version ?? record.userVersion ?? Object.values(record)[0] ?? 0);
+}
+
+async function getTableColumns(prisma: PrismaClientLike, tableName: string) {
+  const rows = await prisma.$queryRawUnsafe<TableColumnInfoRow[]>(
+    `PRAGMA table_info('${tableName}')`
   );
+
+  return new Set(rows.map((row) => row.name));
+}
+
+async function assertRequiredColumns(
+  prisma: PrismaClientLike,
+  tableName: string,
+  requiredColumns: readonly string[]
+) {
+  const columnNames = await getTableColumns(prisma, tableName);
+
+  for (const column of requiredColumns) {
+    if (!columnNames.has(column)) {
+      throw new Error(`Required database column is missing: ${tableName}.${column}`);
+    }
+  }
 }
 
 export async function validateRuntimeDatabase(
@@ -165,6 +193,9 @@ export async function validateRuntimeDatabase(
     currentVersion: schemaVersion,
     prisma,
   });
+
+  await assertRequiredColumns(prisma, 'PostTarget', REQUIRED_POST_TARGET_COLUMNS);
+  await assertRequiredColumns(prisma, 'PublishJob', REQUIRED_PUBLISH_JOB_COLUMNS);
 
   await prisma.$queryRawUnsafe('SELECT 1');
   await fs.promises.access(context.databasePath, fs.constants.R_OK | fs.constants.W_OK);
