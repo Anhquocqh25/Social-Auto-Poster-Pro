@@ -27,11 +27,14 @@ import type {
   BulkPublishEligibilityReason,
   BulkPublishPrepareRowPayload,
   PostSnapshot,
-  PostTargetPageSnapshot,
   PostTargetSnapshot,
 } from '@/types/electron';
 import { getElectronAPI } from '@/lib/electronApi';
-import { t, statusLabel } from '@/lib/i18n';
+import {
+  buildEditableFacebookPageTargets,
+  getUniqueTargetAccountsFromPageTargets,
+} from '@/lib/facebookPageTargetRouting';
+import { t } from '@/lib/i18n';
 import { useLanguageStore } from '@/store/useLanguageStore';
 
 const statusColors = {
@@ -49,6 +52,24 @@ const statusColors = {
 } as const;
 
 const CONTROLLED_BULK_PUBLISH_BATCH_LIMIT = 3;
+
+function statusLabel(status: string, language: 'vi' | 'en') {
+  const labels: Record<string, { vi: string; en: string }> = {
+    draft: { vi: 'Nháp', en: 'Draft' },
+    scheduled: { vi: 'Đã lên lịch', en: 'Scheduled' },
+    queued: { vi: 'Đã xếp hàng', en: 'Queued' },
+    posting: { vi: 'Đang đăng', en: 'Posting' },
+    published: { vi: 'Đã đăng', en: 'Published' },
+    partially_failed: { vi: 'Thất bại một phần', en: 'Partially Failed' },
+    failed: { vi: 'Thất bại', en: 'Failed' },
+    cancelled: { vi: 'Đã hủy', en: 'Cancelled' },
+    blocked: { vi: 'Bị chặn', en: 'Blocked' },
+    unknown: { vi: 'Không rõ', en: 'Unknown' },
+    needs_verification: { vi: 'Cần xác minh', en: 'Needs Verification' },
+  };
+
+  return labels[status]?.[language] ?? status;
+}
 
 interface PersistedBulkReviewRow {
   clientRowId: string;
@@ -738,21 +759,12 @@ export function PostsPage() {
 
     try {
       setSavingPost(true);
-      const primaryTarget = getPrimaryTarget(selectedPost);
+      const pageTargets = buildEditableFacebookPageTargets(selectedPost.postTargets);
 
-      const pageTargets: PostTargetPageSnapshot[] =
-        primaryTarget?.targetType === 'page' && primaryTarget.pageId && primaryTarget.pageName
-          ? [
-              {
-                platform: 'facebook',
-                targetType: 'page',
-                accountId: primaryTarget.accountId,
-                pageId: primaryTarget.pageId,
-                pageName: primaryTarget.pageName,
-                sourceAccountName: primaryTarget.sourceAccountName ?? undefined,
-              },
-            ]
-          : [];
+      const targetAccounts =
+        pageTargets.length > 0
+          ? getUniqueTargetAccountsFromPageTargets(pageTargets)
+          : undefined;
 
       const updated = await electronAPI.posts.updateLocal(selectedPost.id, {
         title: editForm.title || undefined,
@@ -760,7 +772,7 @@ export function PostsPage() {
         hashtags: editForm.hashtags || undefined,
         status: selectedPost.status === 'scheduled' ? 'scheduled' : 'draft',
         scheduledAt: editForm.scheduledAt ? new Date(editForm.scheduledAt).toISOString() : null,
-        targetAccounts: primaryTarget ? [primaryTarget.accountId] : undefined,
+        targetAccounts,
         pageTargets,
       });
 

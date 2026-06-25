@@ -8,8 +8,15 @@ import { Badge } from '@/components/ui/badge';
 import { Calendar, Clock, Hash, Save, Send, Upload, X } from 'lucide-react';
 import { getElectronAPI } from '@/lib/electronApi';
 import { t } from '@/lib/i18n';
+import {
+  buildExplicitFacebookPageTargets,
+  getFacebookTargetKey,
+  getSelectedFacebookPages,
+  getUniqueTargetAccountsFromPageTargets,
+  toggleFacebookTargetSelection,
+} from '@/lib/facebookPageTargetRouting';
 import { useLanguageStore } from '@/store/useLanguageStore';
-import type { FacebookPageTargetOption, PostTargetPageSnapshot } from '@/types/electron';
+import type { FacebookPageTargetOption } from '@/types/electron';
 
 function maskIdentifier(value: string | null | undefined) {
   if (!value) {
@@ -34,10 +41,6 @@ function getAvatarFallback(name: string | null | undefined) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
-}
-
-function getFacebookTargetKey(page: Pick<FacebookPageTargetOption, 'sourceAccountId' | 'pageId'>) {
-  return `${page.sourceAccountId}:${page.pageId}`;
 }
 
 export function CreatePostPage() {
@@ -229,11 +232,15 @@ export function CreatePostPage() {
   };
 
   const getSelectedPages = () => {
-    return facebookPages.filter((page) => selectedTargetKeys.includes(getFacebookTargetKey(page)));
+    return getSelectedFacebookPages(facebookPages, selectedTargetKeys);
+  };
+
+  const createPostPayloadTargets = () => {
+    return buildExplicitFacebookPageTargets(getSelectedPages());
   };
 
   const getTargetAccounts = () => {
-    return Array.from(new Set(getSelectedPages().map((page) => page.sourceAccountId)));
+    return getUniqueTargetAccountsFromPageTargets(createPostPayloadTargets());
   };
 
   const validateCommonForm = () => {
@@ -339,12 +346,7 @@ export function CreatePostPage() {
   }, [publishingModeStatus, realPublishingEnabled]);
 
   const togglePageSelection = (page: FacebookPageTargetOption) => {
-    const targetKey = getFacebookTargetKey(page);
-    setSelectedTargetKeys((prev) =>
-      prev.includes(targetKey)
-        ? prev.filter((key) => key !== targetKey)
-        : [...prev, targetKey]
-    );
+    setSelectedTargetKeys((prev) => toggleFacebookTargetSelection(prev, page));
   };
 
   const resetVideoConfirmation = () => {
@@ -378,15 +380,7 @@ export function CreatePostPage() {
     status: 'draft' | 'scheduled' | 'queued' | 'posting',
     scheduledAt?: string
   ) => {
-    const selectedPages = getSelectedPages();
-    const pageTargets: PostTargetPageSnapshot[] = selectedPages.map((page) => ({
-      platform: 'facebook',
-      targetType: 'page',
-      accountId: page.sourceAccountId,
-      pageId: page.pageId,
-      pageName: page.pageName ?? 'Unnamed Facebook Page',
-      sourceAccountName: page.sourceAccountName,
-    }));
+    const pageTargets = createPostPayloadTargets();
 
     console.info(
       '[CreatePostPage] selectedTargets=%o',

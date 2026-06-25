@@ -20,7 +20,8 @@
     "db:reset:dev": "node scripts/dev-db-reset.cjs --yes",
     "db:seed:demo": "node scripts/dev-demo-seed.cjs",
     "demo:simulation": "npm run db:reset:dev && npm run db:seed:demo",
-    "postinstall": "node scripts/run-with-dev-db.cjs npx prisma generate"
+    "postinstall": "node scripts/run-with-dev-db.cjs npx prisma generate",
+    "test": "node scripts/test-facebook-page-routing.cjs"
   },
   "dependencies": {
     "@prisma/client": "^5.7.1",
