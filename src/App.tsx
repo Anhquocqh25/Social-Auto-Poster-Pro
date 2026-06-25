@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { Dashboard } from './pages/Dashboard';
 import { CalendarPage } from './pages/CalendarPage';
@@ -20,8 +20,11 @@ function App() {
     initializeLanguage();
   }, []);
 
+  const AppRouter =
+    window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+
   return (
-    <BrowserRouter>
+    <AppRouter>
       <Routes>
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Dashboard />} />
@@ -36,7 +39,7 @@ function App() {
         </Route>
         <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
       </Routes>
-    </BrowserRouter>
+    </AppRouter>
   );
 }
 

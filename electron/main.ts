@@ -1246,15 +1246,73 @@ function getPreloadPath() {
 }
 
 function attachWindowDebugging(window: BrowserWindow) {
-  window.webContents.on('console-message', (_event, _level, message) => {
-    if (
+  const sanitizeDiagnosticText = (value: string) =>
+    value
+      .replace(/([?&](?:code|state|token|access_token|refresh_token)=[^&\s]+)/gi, '$1=[redacted]')
+      .replace(/("?(?:code|state|token|access_token|refresh_token)"?\s*:\s*)"[^"]*"/gi, '$1"[redacted]"');
+
+  window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const shouldLogMessage =
       message.includes('[AccountsPage]') ||
       message.includes('[CreatePostPage]') ||
       message.includes('[preload]') ||
-      message.includes('[electronAPI]')
-    ) {
-      console.info('[renderer]', message);
+      message.includes('[electronAPI]') ||
+      message.includes('Router') ||
+      message.includes('route') ||
+      message.includes('navigation') ||
+      message.includes('Failed') ||
+      message.includes('Error');
+
+    if (!shouldLogMessage) {
+      return;
     }
+
+    console.info(
+      '[renderer]',
+      JSON.stringify(
+        {
+          level,
+          line,
+          sourceId: sourceId ? sanitizeDiagnosticText(sourceId) : null,
+          message: sanitizeDiagnosticText(message),
+        },
+        null,
+        2
+      )
+    );
+  });
+
+  window.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      console.error(
+        '[window] did-fail-load',
+        JSON.stringify(
+          {
+            errorCode,
+            errorDescription: sanitizeDiagnosticText(errorDescription),
+            validatedURL: sanitizeDiagnosticText(validatedURL),
+            isMainFrame,
+          },
+          null,
+          2
+        )
+      );
+    }
+  );
+
+  window.webContents.on('render-process-gone', (_event, details) => {
+    console.error(
+      '[window] render-process-gone',
+      JSON.stringify(
+        {
+          reason: details.reason,
+          exitCode: details.exitCode,
+        },
+        null,
+        2
+      )
+    );
   });
 
   window.webContents.on('preload-error', (_event, preloadPath, error) => {
