@@ -42,8 +42,7 @@ async function bootstrap() {
     )
   );
 
-  const mainModuleUrl = pathToFileURL(path.join(__dirname, 'main.js')).href;
-  await import(mainModuleUrl);
+    await import('./main');
 }
 
 void bootstrap().catch((error) => {
