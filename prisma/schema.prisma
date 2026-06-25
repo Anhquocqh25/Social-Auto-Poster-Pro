@@ -64,20 +64,26 @@ model Post {
 }
 
 model PostTarget {
-  id              Int      @id @default(autoincrement())
-  postId          Int
-  accountId       Int
-  platformPostId  String?  // ID from Facebook/TikTok
-  status          String   @default("pending") // 'pending' | 'success' | 'failed'
-  errorMessage    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                Int      @id @default(autoincrement())
+  postId            Int
+  accountId         Int
+  platform          String   @default("facebook")
+  targetType        String   @default("legacy_account") // 'page' | 'legacy_account'
+  pageId            String?
+  pageName          String?
+  sourceAccountName String?
+  platformPostId    String?  // ID from Facebook/TikTok
+  status            String   @default("pending") // 'pending' | 'success' | 'failed'
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  post              Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  account           Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  @@unique([postId, accountId])
+  @@unique([postId, accountId, pageId])
   @@index([status])
+  @@index([accountId, pageId])
 }
 
 model MediaLibrary {
@@ -155,30 +161,35 @@ model PlatformSetting {
 }
 
 model PublishJob {
-  id              Int      @id @default(autoincrement())
-  postId          Int
-  accountId       Int
-  platform        String   // 'facebook' | 'tiktok'
-  status          String   @default("pending") // 'pending' | 'processing' | 'success' | 'failed' | 'cancelled'
-  priority        Int      @default(0)
-  retryCount      Int      @default(0)
-  maxRetries      Int      @default(3)
-  nextRetryAt     DateTime?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  errorCode       String?
-  errorMessage    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                Int      @id @default(autoincrement())
+  postId            Int
+  accountId         Int
+  platform          String   // 'facebook' | 'tiktok'
+  pageId            String?
+  pageName          String?
+  sourceAccountName String?
+  status            String   @default("pending") // 'pending' | 'processing' | 'success' | 'failed' | 'cancelled'
+  priority          Int      @default(0)
+  retryCount        Int      @default(0)
+  maxRetries        Int      @default(3)
+  nextRetryAt       DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  attempts        PublishAttempt[]
+  post              Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  account           Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  attempts          PublishAttempt[]
 
+  @@unique([postId, accountId, pageId])
   @@index([status])
   @@index([nextRetryAt])
   @@index([postId])
   @@index([accountId])
+  @@index([accountId, pageId])
 }
 
 model PublishAttempt {

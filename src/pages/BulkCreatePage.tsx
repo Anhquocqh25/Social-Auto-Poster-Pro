@@ -1095,9 +1095,9 @@ export function BulkCreatePage() {
             {
               platform: 'facebook',
               targetType: 'page',
+              accountId: page.sourceAccountId,
               pageId: page.pageId,
               pageName: page.pageName ?? 'Unnamed Facebook Page',
-              sourceAccountId: page.sourceAccountId,
               sourceAccountName: page.sourceAccountName,
             },
           ],

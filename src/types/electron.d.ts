@@ -175,9 +175,9 @@ export interface FacebookPublishReadinessSnapshot {
 export interface PostTargetPageSnapshot {
   platform: 'facebook';
   targetType: 'page';
+  accountId: number;
   pageId: string;
   pageName: string;
-  sourceAccountId: number;
   sourceAccountName?: string;
 }
 

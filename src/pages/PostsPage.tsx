@@ -746,9 +746,9 @@ export function PostsPage() {
               {
                 platform: 'facebook',
                 targetType: 'page',
+                accountId: primaryTarget.accountId,
                 pageId: primaryTarget.pageId,
                 pageName: primaryTarget.pageName,
-                sourceAccountId: primaryTarget.accountId,
                 sourceAccountName: primaryTarget.sourceAccountName ?? undefined,
               },
             ]

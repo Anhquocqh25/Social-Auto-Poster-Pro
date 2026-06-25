@@ -1,6 +1,14 @@
 import prisma from '@/lib/prisma';
 import { Post, Prisma } from '@prisma/client';
 
+export interface PostPageTargetData {
+  platform: 'facebook';
+  accountId: number;
+  pageId: string;
+  pageName: string;
+  sourceAccountName?: string;
+}
+
 export interface CreatePostData {
   title?: string;
   content: string;
@@ -14,9 +22,10 @@ export interface CreatePostData {
   mediaExtension?: string;
   mediaDurationMs?: number;
   hashtags?: string;
-  status?: 'draft' | 'scheduled';
+  status?: 'draft' | 'scheduled' | 'queued';
   scheduledAt?: Date;
-  targetAccounts: number[]; // account IDs
+  targetAccounts?: number[]; // legacy account IDs
+  pageTargets?: PostPageTargetData[];
 }
 
 export interface UpdatePostData {
@@ -35,6 +44,7 @@ export interface UpdatePostData {
   status?: 'draft' | 'scheduled' | 'queued' | 'posting' | 'published' | 'partially_failed' | 'failed' | 'cancelled';
   scheduledAt?: Date;
   targetAccounts?: number[];
+  pageTargets?: PostPageTargetData[];
 }
 
 export interface PostFilters {
@@ -45,18 +55,54 @@ export interface PostFilters {
   endDate?: Date;
 }
 
+function normalizePostTargetCreates(input: {
+  targetAccounts?: number[];
+  pageTargets?: PostPageTargetData[];
+}) {
+  const explicitPageTargets = Array.isArray(input.pageTargets) ? input.pageTargets : [];
+  if (explicitPageTargets.length > 0) {
+    const uniquePageTargets = new Map<string, PostPageTargetData>();
+
+    for (const target of explicitPageTargets) {
+      const key = `${target.accountId}:${target.pageId}`;
+      if (!uniquePageTargets.has(key)) {
+        uniquePageTargets.set(key, target);
+      }
+    }
+
+    return Array.from(uniquePageTargets.values()).map((target) => ({
+      accountId: target.accountId,
+      platform: target.platform,
+      targetType: 'page',
+      pageId: target.pageId,
+      pageName: target.pageName,
+      sourceAccountName: target.sourceAccountName ?? null,
+      status: 'pending' as const,
+    }));
+  }
+
+  const legacyAccounts = Array.isArray(input.targetAccounts) ? input.targetAccounts : [];
+  return legacyAccounts.map((accountId) => ({
+    accountId,
+    platform: 'facebook',
+    targetType: 'legacy_account',
+    pageId: null,
+    pageName: null,
+    sourceAccountName: null,
+    status: 'pending' as const,
+  }));
+}
+
 class PostService {
   async createPost(data: CreatePostData): Promise<Post> {
-    const { targetAccounts, ...postData } = data;
+    const { targetAccounts, pageTargets, ...postData } = data;
+    const normalizedTargets = normalizePostTargetCreates({ targetAccounts, pageTargets });
 
     const post = await prisma.post.create({
       data: {
         ...postData,
         postTargets: {
-          create: targetAccounts.map((accountId) => ({
-            accountId,
-            status: 'pending',
-          })),
+          create: normalizedTargets,
         },
       },
       include: {
@@ -72,23 +118,24 @@ class PostService {
   }
 
   async updatePost(id: number, data: UpdatePostData): Promise<Post> {
-    const { targetAccounts, ...postData } = data;
+    const { targetAccounts, pageTargets, ...postData } = data;
+    const shouldUpdateTargets = typeof targetAccounts !== 'undefined' || typeof pageTargets !== 'undefined';
 
-    // If targetAccounts is provided, update the post targets
-    if (targetAccounts) {
-      // Delete existing targets
+    if (shouldUpdateTargets) {
+      const normalizedTargets = normalizePostTargetCreates({ targetAccounts, pageTargets });
+
       await prisma.postTarget.deleteMany({
         where: { postId: id },
       });
 
-      // Create new targets
-      await prisma.postTarget.createMany({
-        data: targetAccounts.map((accountId) => ({
-          postId: id,
-          accountId,
-          status: 'pending',
-        })),
-      });
+      if (normalizedTargets.length > 0) {
+        await prisma.postTarget.createMany({
+          data: normalizedTargets.map((target) => ({
+            postId: id,
+            ...target,
+          })),
+        });
+      }
     }
 
     const post = await prisma.post.update({
@@ -234,6 +281,11 @@ class PostService {
         postTargets: {
           create: (originalPost as any).postTargets.map((target: any) => ({
             accountId: target.accountId,
+            platform: target.platform ?? 'facebook',
+            targetType: target.targetType ?? (target.pageId ? 'page' : 'legacy_account'),
+            pageId: target.pageId ?? null,
+            pageName: target.pageName ?? null,
+            sourceAccountName: target.sourceAccountName ?? null,
             status: 'pending',
           })),
         },

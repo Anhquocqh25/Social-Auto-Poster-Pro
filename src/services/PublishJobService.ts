@@ -12,7 +12,8 @@ export class PublishJobService {
   async createJobsForPost(postId: number): Promise<number> {
     try {
       logger.info(`[PublishJobService] Creating publish jobs for post ${postId}`);
-      
+
+
       // Get post with targets
       const post = await prisma.post.findUnique({
         where: { id: postId },
@@ -22,16 +23,19 @@ export class PublishJobService {
           }
         }
       });
-      
+
+
       if (!post) {
         throw new Error(`Post ${postId} not found`);
       }
-      
+
+
       if (post.status !== 'scheduled' && post.status !== 'queued') {
         logger.warn(`[PublishJobService] Post ${postId} is not in schedulable status: ${post.status}`);
         return 0;
       }
-      
+
+
       const existingActiveJobs = await prisma.publishJob.findMany({
         where: {
           postId,
@@ -41,62 +45,84 @@ export class PublishJobService {
         },
         select: {
           accountId: true,
+          pageId: true,
         },
       });
 
-      const existingActiveAccountIds = new Set(existingActiveJobs.map((job) => job.accountId));
+      const existingActiveTargetKeys = new Set(
+        existingActiveJobs.map((job) => `${job.accountId}:${job.pageId ?? ''}`)
+      );
 
-      // Create jobs for each target account
       const jobs = [];
       for (const target of post.postTargets) {
-        // Skip if account is not active
         if (target.account.status !== 'active') {
           logger.info(`[PublishJobService] Skipping inactive account ${target.account.id} for post ${postId}`);
           continue;
         }
 
-        if (existingActiveAccountIds.has(target.accountId)) {
-          logger.info(
-            `[PublishJobService] Skipping duplicate active job for post ${postId} on account ${target.accountId}`
+        const isExplicitFacebookPageTarget =
+          target.account.platform === 'facebook' && target.targetType === 'page';
+
+        if (isExplicitFacebookPageTarget && !target.pageId) {
+          logger.warn(
+            `[PublishJobService] Skipping invalid Facebook page target postId=${postId} accountId=${target.accountId} missingPageId=true`
           );
           continue;
         }
-        
+
+        const targetKey = `${target.accountId}:${target.pageId ?? ''}`;
+        if (existingActiveTargetKeys.has(targetKey)) {
+          logger.info(
+            `[PublishJobService] Skipping duplicate active job for postId=${postId} accountId=${target.accountId} pageId=${target.pageId ?? 'none'}`
+          );
+          continue;
+        }
+
         jobs.push({
           postId,
           accountId: target.accountId,
           platform: target.account.platform as 'facebook' | 'tiktok',
+          pageId: target.pageId ?? null,
+          pageName: target.pageName ?? null,
+          sourceAccountName: target.sourceAccountName ?? target.account.accountName ?? null,
           status: 'pending',
-          priority: 0, // Could be based on scheduled time or other factors
+          priority: 0,
         });
+        existingActiveTargetKeys.add(targetKey);
       }
-      
+
+
       if (jobs.length === 0) {
         logger.warn(`[PublishJobService] No new valid targets found for post ${postId}`);
         return 0;
       }
-      
+
+
       // Create all jobs
       const createdJobs = await prisma.publishJob.createMany({
         data: jobs
         // skipDuplicates: true, // Not supported in this Prisma version
       });
-      
+
+
       logger.info(`[PublishJobService] Created ${createdJobs.count} publish jobs for post ${postId}`);
-      
+
+
       // Update post status to queued
       await prisma.post.update({
         where: { id: postId },
         data: { status: 'queued' },
       });
-      
+
+
       return createdJobs.count;
     } catch (error) {
       logger.error(`[PublishJobService] Failed to create jobs for post ${postId}`, { error });
       throw error;
     }
   }
-  
+
+
   /**
    * Get pending jobs ready for processing
    */
@@ -105,6 +131,9 @@ export class PublishJobService {
     postId: number;
     accountId: number;
     platform: string;
+    pageId: string | null;
+    pageName: string | null;
+    sourceAccountName: string | null;
     retryCount: number;
     post: {
       id: number;
@@ -160,12 +189,16 @@ export class PublishJobService {
         ],
         take: limit
       });
-      
+
+
       return jobs.map(job => ({
         id: job.id,
         postId: job.postId,
         accountId: job.accountId,
         platform: job.platform,
+        pageId: job.pageId,
+        pageName: job.pageName,
+        sourceAccountName: job.sourceAccountName,
         retryCount: job.retryCount,
         post: {
           id: job.post.id,
@@ -189,7 +222,8 @@ export class PublishJobService {
       throw error;
     }
   }
-  
+
+
   /**
    * Get job by ID
    */
@@ -205,19 +239,22 @@ export class PublishJobService {
           }
         }
       });
-      
+
+
       return job;
     } catch (error) {
       logger.error(`[PublishJobService] Failed to get job ${id}`, { error });
       throw error;
     }
   }
-  
+
+
   /**
    * Update job status
    */
   async updateJobStatus(
-    jobId: number, 
+    jobId: number,
+
     status: 'pending' | 'processing' | 'success' | 'failed' | 'cancelled',
     errorCode?: string,
     errorMessage?: string
@@ -227,23 +264,28 @@ export class PublishJobService {
         status,
         updatedAt: new Date()
       };
-      
+
+
       if (status === 'processing') {
         data.startedAt = new Date();
       }
-      
+
+
       if (status === 'success' || status === 'failed' || status === 'cancelled') {
         data.completedAt = new Date();
       }
-      
+
+
       if (errorCode) data.errorCode = errorCode;
       if (errorMessage) data.errorMessage = errorMessage;
-      
+
+
       const job = await prisma.publishJob.update({
         where: { id: jobId },
         data
       });
-      
+
+
       logger.info(`[PublishJobService] Updated job ${jobId} status to ${status}`);
       return job;
     } catch (error) {
@@ -251,36 +293,43 @@ export class PublishJobService {
       throw error;
     }
   }
-  
+
+
   /**
    * Increment retry count and set next retry time
    */
   async incrementRetry(
-    jobId: number, 
-    baseDelayMinutes: number = 1, 
+    jobId: number,
+
+    baseDelayMinutes: number = 1,
+
     maxRetries: number = 3
   ): Promise<boolean> {
     try {
       const job = await prisma.publishJob.findUnique({
         where: { id: jobId }
       });
-      
+
+
       if (!job) {
         logger.warn(`[PublishJobService] Job ${jobId} not found for retry`);
         return false;
       }
-      
+
+
       if (job.retryCount >= maxRetries) {
         logger.warn(`[PublishJobService] Job ${jobId} exceeded max retries (${job.retryCount}/${maxRetries})`);
         await this.updateJobStatus(jobId, 'failed', 'MAX_RETRIES_EXCEEDED', 'Maximum retry attempts exceeded');
         return false;
       }
-      
+
+
       const retryCount = job.retryCount + 1;
       // Exponential backoff: baseDelay * 2^(retryCount-1) minutes
       const delayMinutes = baseDelayMinutes * Math.pow(2, retryCount - 1);
       const nextRetryAt = new Date(Date.now() + delayMinutes * 60 * 1000);
-      
+
+
       await prisma.publishJob.update({
         where: { id: jobId },
         data: {
@@ -290,7 +339,8 @@ export class PublishJobService {
           updatedAt: new Date()
         }
       });
-      
+
+
       logger.info(`[PublishJobService] Incremented retry for job ${jobId} to ${retryCount}/${maxRetries}, next retry in ${delayMinutes} minutes`);
       return true;
     } catch (error) {
@@ -298,7 +348,8 @@ export class PublishJobService {
       return false;
     }
   }
-  
+
+
   /**
    * Get job statistics
    */
@@ -308,12 +359,14 @@ export class PublishJobService {
         by: ['status'],
         _count: true
       });
-      
+
+
       const result: Record<string, number> = {};
       stats.forEach(({ status, _count }) => {
         result[status] = _count;
       });
-      
+
+
       return result;
     } catch (error) {
       logger.error('[PublishJobService] Failed to get job stats', { error });

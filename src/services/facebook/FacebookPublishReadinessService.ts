@@ -52,6 +52,21 @@ const REQUIRED_PAGE_PERMISSIONS = [
   'pages_manage_posts',
 ] as const;
 
+type ResolvedResult =
+  | {
+      ok: true;
+      target: FacebookResolvedPublishTarget;
+    }
+  | {
+      ok: false;
+      blockedReason: FacebookPublishBlockedReason;
+      accountId?: number;
+      pageIdMasked?: string;
+      pageName?: string;
+      missingPermissions?: string[];
+      hasEncryptedPageToken?: boolean;
+    };
+
 export class FacebookPublishReadinessService {
   private async getPostWithTargets(postId: number) {
     return prisma.post.findUnique({
@@ -71,23 +86,113 @@ export class FacebookPublishReadinessService {
     });
   }
 
-  async resolveFacebookPublishTarget(
-    postId: number
-  ): Promise<
-    | {
-        ok: true;
-        target: FacebookResolvedPublishTarget;
-      }
-    | {
-        ok: false;
-        blockedReason: FacebookPublishBlockedReason;
-        accountId?: number;
-        pageIdMasked?: string;
-        pageName?: string;
-        missingPermissions?: string[];
-        hasEncryptedPageToken?: boolean;
-      }
-  > {
+  private parseStoredPages(pagesRaw: string | null | undefined): FacebookPageSummary[] {
+    if (!pagesRaw) {
+      return [];
+    }
+
+    try {
+      return JSON.parse(pagesRaw) as FacebookPageSummary[];
+    } catch {
+      return [];
+    }
+  }
+
+  private resolveFromAccountAndPage(input: {
+    account: {
+      id: number;
+      status: string;
+      platformToken: {
+        scope: string | null;
+      } | null;
+      platformSettings: Array<{
+        settingKey: string;
+        settingValue: string;
+      }>;
+    };
+    pageId: string;
+    pageName?: string | null;
+  }): ResolvedResult {
+    const { account, pageId, pageName } = input;
+
+    if (account.status !== 'active') {
+      return {
+        ok: false,
+        blockedReason: 'inactive_account',
+        accountId: account.id,
+        pageIdMasked: maskPageId(pageId),
+        pageName: pageName ?? undefined,
+      };
+    }
+
+    const grantedScopes = (account.platformToken?.scope ?? '')
+      .split(',')
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+
+    const missingPermissions = REQUIRED_PAGE_PERMISSIONS.filter(
+      (permission) => !grantedScopes.includes(permission)
+    );
+
+    if (missingPermissions.length > 0) {
+      return {
+        ok: false,
+        blockedReason: 'missing_permissions',
+        accountId: account.id,
+        pageIdMasked: maskPageId(pageId),
+        pageName: pageName ?? undefined,
+        missingPermissions,
+      };
+    }
+
+    const pagesRaw =
+      account.platformSettings.find((setting) => setting.settingKey === 'facebook.pages')
+        ?.settingValue ?? null;
+    const pages = this.parseStoredPages(pagesRaw);
+    const page = pages.find((entry) => entry.id === pageId);
+
+    if (!page) {
+      return {
+        ok: false,
+        blockedReason: 'missing_page',
+        accountId: account.id,
+        pageIdMasked: maskPageId(pageId),
+        pageName: pageName ?? undefined,
+      };
+    }
+
+    const encryptedPageTokenKey = `facebook.pageToken.${page.id}`;
+    const encryptedPageTokenSetting = account.platformSettings.find(
+      (setting) => setting.settingKey === encryptedPageTokenKey
+    );
+    const hasEncryptedPageToken = !!encryptedPageTokenSetting?.settingValue;
+
+    if (!hasEncryptedPageToken) {
+      return {
+        ok: false,
+        blockedReason: 'missing_page_access_token',
+        accountId: account.id,
+        pageIdMasked: maskPageId(page.id),
+        pageName: page.name ?? pageName ?? undefined,
+        hasEncryptedPageToken: false,
+      };
+    }
+
+    return {
+      ok: true,
+      target: {
+        accountId: account.id,
+        pageId: page.id,
+        pageName: page.name ?? pageName ?? 'Unknown Facebook Page',
+        pageIdMasked: maskPageId(page.id) ?? 'Unknown',
+        encryptedPageTokenKey,
+        hasEncryptedPageToken: true,
+        isLegacyFallback: false,
+      },
+    };
+  }
+
+  async resolveFacebookPublishTarget(postId: number): Promise<ResolvedResult> {
     const post = await this.getPostWithTargets(postId);
 
     if (!post || post.postTargets.length === 0) {
@@ -117,12 +222,21 @@ export class FacebookPublishReadinessService {
       };
     }
 
-    if (account.status !== 'active') {
-      return {
-        ok: false,
-        blockedReason: 'inactive_account',
-        accountId: account.id,
-      };
+    if (facebookTarget.targetType === 'page') {
+      if (!facebookTarget.pageId) {
+        return {
+          ok: false,
+          blockedReason: 'missing_page_target',
+          accountId: account.id,
+          pageName: facebookTarget.pageName ?? undefined,
+        };
+      }
+
+      return this.resolveFromAccountAndPage({
+        account,
+        pageId: facebookTarget.pageId,
+        pageName: facebookTarget.pageName,
+      });
     }
 
     const selectedPageId =
@@ -130,9 +244,6 @@ export class FacebookPublishReadinessService {
         ?.settingValue ?? null;
     const selectedPageName =
       account.platformSettings.find((setting) => setting.settingKey === 'facebook.selectedPageName')
-        ?.settingValue ?? null;
-    const pagesRaw =
-      account.platformSettings.find((setting) => setting.settingKey === 'facebook.pages')
         ?.settingValue ?? null;
 
     if (!selectedPageId) {
@@ -143,76 +254,50 @@ export class FacebookPublishReadinessService {
       };
     }
 
-    const grantedScopes = (account.platformToken?.scope ?? '')
-      .split(',')
-      .map((scope) => scope.trim())
-      .filter(Boolean);
+    return this.resolveFromAccountAndPage({
+      account,
+      pageId: selectedPageId,
+      pageName: selectedPageName,
+    });
+  }
 
-    const missingPermissions = REQUIRED_PAGE_PERMISSIONS.filter(
-      (permission) => !grantedScopes.includes(permission)
-    );
-
-    if (missingPermissions.length > 0) {
-      return {
-        ok: false,
-        blockedReason: 'missing_permissions',
-        accountId: account.id,
-        pageIdMasked: maskPageId(selectedPageId),
-        pageName: selectedPageName ?? undefined,
-        missingPermissions,
-      };
-    }
-
-    let pages: FacebookPageSummary[] = [];
-    if (pagesRaw) {
-      try {
-        pages = JSON.parse(pagesRaw);
-      } catch {
-        pages = [];
-      }
-    }
-
-    const page = pages.find((entry) => entry.id === selectedPageId);
-
-    if (!page) {
-      return {
-        ok: false,
-        blockedReason: 'missing_page',
-        accountId: account.id,
-        pageIdMasked: maskPageId(selectedPageId),
-        pageName: selectedPageName ?? undefined,
-      };
-    }
-
-    const encryptedPageTokenKey = `facebook.pageToken.${page.id}`;
-    const encryptedPageTokenSetting = account.platformSettings.find(
-      (setting) => setting.settingKey === encryptedPageTokenKey
-    );
-    const hasEncryptedPageToken = !!encryptedPageTokenSetting?.settingValue;
-
-    if (!hasEncryptedPageToken) {
-      return {
-        ok: false,
-        blockedReason: 'missing_page_access_token',
-        accountId: account.id,
-        pageIdMasked: maskPageId(page.id),
-        pageName: page.name ?? selectedPageName ?? undefined,
-        hasEncryptedPageToken: false,
-      };
-    }
-
-    return {
-      ok: true,
-      target: {
-        accountId: account.id,
-        pageId: page.id,
-        pageName: page.name ?? selectedPageName ?? 'Unknown Facebook Page',
-        pageIdMasked: maskPageId(page.id) ?? 'Unknown',
-        encryptedPageTokenKey,
-        hasEncryptedPageToken: true,
-        isLegacyFallback: false,
+  async resolveFacebookJobTarget(input: {
+    accountId: number;
+    pageId: string;
+    pageName?: string | null;
+  }): Promise<ResolvedResult> {
+    const account = await prisma.account.findUnique({
+      where: { id: input.accountId },
+      include: {
+        platformToken: true,
+        platformSettings: true,
       },
-    };
+    });
+
+    if (!account || account.platform !== 'facebook') {
+      return {
+        ok: false,
+        blockedReason: 'missing_source_account',
+        accountId: input.accountId,
+        pageIdMasked: maskPageId(input.pageId),
+        pageName: input.pageName ?? undefined,
+      };
+    }
+
+    if (!input.pageId) {
+      return {
+        ok: false,
+        blockedReason: 'missing_page_target',
+        accountId: input.accountId,
+        pageName: input.pageName ?? undefined,
+      };
+    }
+
+    return this.resolveFromAccountAndPage({
+      account,
+      pageId: input.pageId,
+      pageName: input.pageName,
+    });
   }
 
   async getPostReadiness(postId: number): Promise<FacebookPublishReadinessResult> {

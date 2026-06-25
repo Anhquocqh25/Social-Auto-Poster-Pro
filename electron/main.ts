@@ -2215,7 +2215,84 @@ function registerIpcHandlers() {
     return facebookPublishReadinessService.getPostReadiness(postId);
   });
 
-  ipcMain.handle('posts:create', async (_event, payload) => {
+ipcMain.handle('posts:create', async (_event, payload) => {
+    const submittedPageTargets = Array.isArray(payload.pageTargets) ? payload.pageTargets : [];
+    const availablePageTargets = await accountConnectionService.listFacebookPageTargets();
+    const normalizedPageTargets = new Map<
+      string,
+      {
+        platform: 'facebook';
+        accountId: number;
+        pageId: string;
+        pageName: string;
+        sourceAccountName?: string;
+      }
+    >();
+
+    for (const rawTarget of submittedPageTargets) {
+      const accountId =
+        typeof rawTarget?.accountId === 'number' ? rawTarget.accountId : Number.NaN;
+      const pageId =
+        typeof rawTarget?.pageId === 'string' ? rawTarget.pageId.trim() : '';
+      const pageName =
+        typeof rawTarget?.pageName === 'string' && rawTarget.pageName.trim().length > 0
+          ? rawTarget.pageName.trim()
+          : 'Unnamed Facebook Page';
+
+      if (!Number.isInteger(accountId) || accountId <= 0) {
+        throw new Error('Invalid Facebook target: accountId is required.');
+      }
+
+      if (!pageId) {
+        throw new Error('Invalid Facebook target: pageId is required.');
+      }
+
+      const matchedPage = availablePageTargets.find(
+        (page: {
+          sourceAccountId: number;
+          pageId: string;
+          pageName: string | null;
+          sourceAccountName: string;
+        }) => page.sourceAccountId === accountId && page.pageId === pageId
+      );
+
+      if (!matchedPage) {
+        throw new Error(
+          `Invalid Facebook target: page ${pageId} does not belong to account ${accountId}.`
+        );
+      }
+
+      const targetKey = `${accountId}:${pageId}`;
+      if (!normalizedPageTargets.has(targetKey)) {
+        normalizedPageTargets.set(targetKey, {
+          platform: 'facebook',
+          accountId,
+          pageId,
+          pageName: matchedPage.pageName ?? pageName,
+          sourceAccountName: matchedPage.sourceAccountName,
+        });
+      }
+    }
+
+    const explicitPageTargets = Array.from(normalizedPageTargets.values());
+    if (submittedPageTargets.length > 0 && explicitPageTargets.length === 0) {
+      throw new Error('At least one Facebook Page must be selected.');
+    }
+
+    const targetAccounts =
+      explicitPageTargets.length > 0
+        ? Array.from(new Set(explicitPageTargets.map((target) => target.accountId)))
+        : payload.targetAccounts ?? [];
+
+    console.info(
+      '[posts:create] selectedTargets=%o',
+      explicitPageTargets.map((target) => ({
+        accountId: target.accountId,
+        pageId: target.pageId,
+        pageName: target.pageName,
+      }))
+    );
+
     const post = await PostService.createPost({
       title: payload.title || undefined,
       content: payload.content,
@@ -2231,13 +2308,11 @@ function registerIpcHandlers() {
       mediaDurationMs: payload.mediaDurationMs ?? undefined,
       status: payload.status,
       scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : undefined,
-      targetAccounts: payload.targetAccounts ?? [],
+      targetAccounts,
+      pageTargets: explicitPageTargets,
     });
 
-    const firstPageTarget =
-      Array.isArray(payload.pageTargets) && payload.pageTargets.length > 0
-        ? payload.pageTargets[0]
-        : null;
+    const firstPageTarget = explicitPageTargets.length > 0 ? explicitPageTargets[0] : null;
 
     console.info(
       `[PostNow] created postId=${post.id} mediaType=${post.mediaType ?? 'none'} hasMediaLocalPath=${post.mediaLocalPath ? 'true' : 'false'} targetPage=${firstPageTarget?.pageId ? `${String(firstPageTarget.pageId).slice(0, 2)}••••${String(firstPageTarget.pageId).slice(-4)}` : 'none'}`
@@ -2295,18 +2370,84 @@ function registerIpcHandlers() {
       );
     }
 
+    const submittedPageTargets = Array.isArray(payload.pageTargets) ? payload.pageTargets : [];
+    const availablePageTargets = await accountConnectionService.listFacebookPageTargets();
+    const normalizedPageTargets = new Map<
+      string,
+      {
+        platform: 'facebook';
+        accountId: number;
+        pageId: string;
+        pageName: string;
+        sourceAccountName?: string;
+      }
+    >();
+
+    for (const rawTarget of submittedPageTargets) {
+      const accountId =
+        typeof rawTarget?.accountId === 'number' ? rawTarget.accountId : Number.NaN;
+      const pageId =
+        typeof rawTarget?.pageId === 'string' ? rawTarget.pageId.trim() : '';
+      const pageName =
+        typeof rawTarget?.pageName === 'string' && rawTarget.pageName.trim().length > 0
+          ? rawTarget.pageName.trim()
+          : 'Unnamed Facebook Page';
+
+      if (!Number.isInteger(accountId) || accountId <= 0) {
+        throw new Error('Invalid Facebook target: accountId is required.');
+      }
+
+      if (!pageId) {
+        throw new Error('Invalid Facebook target: pageId is required.');
+      }
+
+      const matchedPage = availablePageTargets.find(
+        (page: {
+          sourceAccountId: number;
+          pageId: string;
+          pageName: string | null;
+          sourceAccountName: string;
+        }) => page.sourceAccountId === accountId && page.pageId === pageId
+      );
+
+      if (!matchedPage) {
+        throw new Error(
+          `Invalid Facebook target: page ${pageId} does not belong to account ${accountId}.`
+        );
+      }
+
+      const targetKey = `${accountId}:${pageId}`;
+      if (!normalizedPageTargets.has(targetKey)) {
+        normalizedPageTargets.set(targetKey, {
+          platform: 'facebook',
+          accountId,
+          pageId,
+          pageName: matchedPage.pageName ?? pageName,
+          sourceAccountName: matchedPage.sourceAccountName,
+        });
+      }
+    }
+
+    const explicitPageTargets = Array.from(normalizedPageTargets.values());
+    if (submittedPageTargets.length > 0 && explicitPageTargets.length === 0) {
+      throw new Error('At least one Facebook Page must be selected.');
+    }
+
     const targetAccounts =
-      Array.isArray(payload.targetAccounts) && payload.targetAccounts.length > 0
-        ? payload.targetAccounts
-        : Array.isArray(payload.pageTargets) && payload.pageTargets.length > 0
-          ? Array.from(
-              new Set(
-                payload.pageTargets
-                  .map((target: { sourceAccountId?: number }) => target.sourceAccountId)
-                  .filter((value: number | undefined): value is number => typeof value === 'number')
-              )
-            )
+      explicitPageTargets.length > 0
+        ? Array.from(new Set(explicitPageTargets.map((target) => target.accountId)))
+        : Array.isArray(payload.targetAccounts) && payload.targetAccounts.length > 0
+          ? payload.targetAccounts
           : undefined;
+
+    console.info(
+      '[posts:updateLocal] selectedTargets=%o',
+      explicitPageTargets.map((target) => ({
+        accountId: target.accountId,
+        pageId: target.pageId,
+        pageName: target.pageName,
+      }))
+    );
 
     const updatedPost = await PostService.updatePost(postId, {
       title: payload.title,
@@ -2329,6 +2470,7 @@ function registerIpcHandlers() {
             ? new Date(payload.scheduledAt)
             : undefined,
       targetAccounts,
+      pageTargets: submittedPageTargets.length > 0 ? explicitPageTargets : undefined,
     });
 
     return serializePost(updatedPost);

@@ -85,13 +85,17 @@ export class QueueService {
   private async processJob(job: any) {
     const attemptNumber = job.retryCount + 1;
 
-    console.info(`[Queue] worker picked jobId=${job.id} postId=${job.postId}`);
+    console.info(
+      `[Queue] worker picked jobId=${job.id} postId=${job.postId} accountId=${job.accountId} pageId=${job.pageId ?? 'none'} pageName=${job.pageName ?? 'unknown'}`
+    );
 
     logger.info('[QueueService] Publish attempt started', {
       jobId: job.id,
       postId: job.postId,
       platform: job.platform,
       accountId: job.accountId,
+      pageId: job.pageId ?? null,
+      pageName: job.pageName ?? null,
       attemptNumber,
       retryCount: job.retryCount,
     });
@@ -132,6 +136,9 @@ export class QueueService {
           jobId: job.id,
           postId: job.postId,
           platform: job.platform,
+          accountId: job.accountId,
+          pageId: job.pageId ?? null,
+          pageName: job.pageName ?? null,
           attemptNumber,
         });
 
@@ -149,63 +156,88 @@ export class QueueService {
             }
 
             if (publishMode === 'real') {
-              const resolvedTarget = await facebookPublishReadinessService.resolveFacebookPublishTarget(
-                job.postId
-              );
-
-              if (!resolvedTarget.ok) {
-                console.info(
-                  `[Queue] publish start postId=${job.postId} platform=facebook mediaType=${post.mediaType ?? 'none'}`
-                );
+              if (!job.pageId) {
                 success = false;
                 errorCode = 'FACEBOOK_REAL_PUBLISH_BLOCKED';
                 errorMessage =
-                  resolvedTarget.blockedReason === 'missing_page_access_token'
-                    ? 'Real Facebook publishing is blocked because the encrypted Facebook Page token is missing.'
-                    : resolvedTarget.blockedReason === 'legacy_account_target'
-                      ? 'Real Facebook publishing is blocked because this post still uses a legacy account target.'
-                      : `Real Facebook publishing is blocked: ${resolvedTarget.blockedReason ?? 'unknown readiness issue'}.`;
-
+                  'Real Facebook publishing is blocked because the selected Facebook Page ID is missing on the queued job.';
                 responseData = JSON.stringify({
-                  blockedReason: resolvedTarget.blockedReason ?? 'unknown',
-                  pageName: resolvedTarget.pageName ?? null,
-                  pageIdMasked: resolvedTarget.pageIdMasked ?? null,
-                  hasEncryptedPageToken: resolvedTarget.hasEncryptedPageToken ?? false,
-                  missingPermissions: resolvedTarget.missingPermissions ?? [],
+                  blockedReason: 'missing_page_target',
+                  accountId: job.accountId,
+                  pageId: null,
+                  pageName: job.pageName ?? null,
                 });
-                } else {
-                  const facebookEnv = loadFacebookEnvConfig();
+              } else {
+                const resolvedTarget = await facebookPublishReadinessService.resolveFacebookJobTarget({
+                  accountId: job.accountId,
+                  pageId: job.pageId,
+                  pageName: job.pageName ?? null,
+                });
 
-                if (!facebookEnv.realPublishingEnabled) {
+                if (!resolvedTarget.ok) {
+                  console.info(
+                    `[Queue] publish start postId=${job.postId} jobId=${job.id} accountId=${job.accountId} pageId=${job.pageId} pageName=${job.pageName ?? 'unknown'} platform=facebook mediaType=${post.mediaType ?? 'none'}`
+                  );
                   success = false;
                   errorCode = 'FACEBOOK_REAL_PUBLISH_BLOCKED';
                   errorMessage =
-                    'Real Facebook publishing remains disabled until Phase 7 publish enablement is explicitly turned on.';
+                    resolvedTarget.blockedReason === 'missing_page_access_token'
+                      ? 'Real Facebook publishing is blocked because the encrypted Facebook Page token is missing.'
+                      : resolvedTarget.blockedReason === 'legacy_account_target'
+                        ? 'Real Facebook publishing is blocked because this post still uses a legacy account target.'
+                        : `Real Facebook publishing is blocked: ${resolvedTarget.blockedReason ?? 'unknown readiness issue'}.`;
+
                   responseData = JSON.stringify({
-                    blockedReason: 'real_publishing_disabled',
-                    pageName: resolvedTarget.target.pageName,
-                    pageIdMasked: resolvedTarget.target.pageIdMasked,
-                    hasEncryptedPageToken: resolvedTarget.target.hasEncryptedPageToken,
+                    blockedReason: resolvedTarget.blockedReason ?? 'unknown',
+                    pageName: resolvedTarget.pageName ?? null,
+                    pageIdMasked: resolvedTarget.pageIdMasked ?? null,
+                    hasEncryptedPageToken: resolvedTarget.hasEncryptedPageToken ?? false,
+                    missingPermissions: resolvedTarget.missingPermissions ?? [],
+                    accountId: job.accountId,
+                    pageId: job.pageId,
                   });
+                } else {
+                  const facebookEnv = loadFacebookEnvConfig();
+
+                  if (!facebookEnv.realPublishingEnabled) {
+                    success = false;
+                    errorCode = 'FACEBOOK_REAL_PUBLISH_BLOCKED';
+                    errorMessage =
+                      'Real Facebook publishing remains disabled until Phase 7 publish enablement is explicitly turned on.';
+                    responseData = JSON.stringify({
+                      blockedReason: 'real_publishing_disabled',
+                      pageName: resolvedTarget.target.pageName,
+                      pageIdMasked: resolvedTarget.target.pageIdMasked,
+                      hasEncryptedPageToken: resolvedTarget.target.hasEncryptedPageToken,
+                      accountId: resolvedTarget.target.accountId,
+                      pageId: resolvedTarget.target.pageId,
+                    });
                   } else {
                     console.info(
-                      `[Queue] publish start postId=${job.postId} platform=facebook mediaType=${post.mediaType ?? 'none'}`
+                      `[Queue] publish start postId=${job.postId} jobId=${job.id} accountId=${job.accountId} pageId=${job.pageId} pageName=${job.pageName ?? 'unknown'} platform=facebook mediaType=${post.mediaType ?? 'none'}`
                     );
                     const fbResult = await facebookService.publishForAccount({
-                    accountId: resolvedTarget.target.accountId,
-                    pageId: resolvedTarget.target.pageId,
-                    message: publishMessage,
-                    mediaType: (post.mediaType as 'photo' | 'video' | 'none' | null) ?? 'none',
-                    mediaUrl: post.mediaUrl ?? undefined,
-                    mediaLocalPath: post.mediaLocalPath ?? undefined,
-                    publishMode,
-                  });
+                      accountId: resolvedTarget.target.accountId,
+                      pageId: resolvedTarget.target.pageId,
+                      message: publishMessage,
+                      mediaType: (post.mediaType as 'photo' | 'video' | 'none' | null) ?? 'none',
+                      mediaUrl: post.mediaUrl ?? undefined,
+                      mediaLocalPath: post.mediaLocalPath ?? undefined,
+                      publishMode,
+                    });
 
-                  success = fbResult.success;
-                  errorCode = fbResult.errorCode;
-                  errorMessage = fbResult.errorMessage;
-                  responseData = JSON.stringify(fbResult.rawResponse ?? { id: fbResult.postId });
-                  finalState = fbResult.finalState ?? (fbResult.success ? 'published' : 'failed');
+                    success = fbResult.success;
+                    errorCode = fbResult.errorCode;
+                    errorMessage = fbResult.errorMessage;
+                    responseData = JSON.stringify(
+                      fbResult.rawResponse ?? {
+                        id: fbResult.postId,
+                        accountId: resolvedTarget.target.accountId,
+                        pageId: resolvedTarget.target.pageId,
+                      }
+                    );
+                    finalState = fbResult.finalState ?? (fbResult.success ? 'published' : 'failed');
+                  }
                 }
               }
             } else {
@@ -230,6 +262,8 @@ export class QueueService {
             if (!success && publishMode === 'real') {
               logger.warn('[QueueService] Facebook real publish blocked by readiness gate', {
                 accountId: job.accountId,
+                pageId: job.pageId ?? null,
+                pageName: job.pageName ?? null,
                 jobId: job.id,
                 attemptNumber,
                 errorCode,
@@ -262,17 +296,18 @@ export class QueueService {
         await publishJobService.updateJobStatus(job.id, 'success');
 
         // Update post target status
-        await prisma.postTarget.updateMany({
-          where: {
-            postId: job.postId,
-            accountId: job.accountId
-          },
-          data: {
-            status: 'success',
-            platformPostId: responseData ? JSON.parse(responseData).id : undefined,
-            updatedAt: new Date()
-          }
-        });
+          await prisma.postTarget.updateMany({
+            where: {
+              postId: job.postId,
+              accountId: job.accountId,
+              pageId: job.pageId ?? null,
+            },
+            data: {
+              status: 'success',
+              platformPostId: responseData ? JSON.parse(responseData).id : undefined,
+              updatedAt: new Date()
+            }
+          });
 
         const remainingIncompleteTargets = await prisma.postTarget.count({
           where: {
@@ -306,7 +341,7 @@ export class QueueService {
         await notificationService.createNotification({
           type: 'success',
           title: 'Publish succeeded',
-          message: `Post #${job.postId} published successfully for account #${job.accountId}.`,
+          message: `Post #${job.postId} published successfully for account #${job.accountId}${job.pageName ? ` (${job.pageName})` : ''}.`,
           relatedPostId: job.postId,
           relatedJobId: job.id,
         });
@@ -315,6 +350,8 @@ export class QueueService {
           jobId: job.id,
           postId: job.postId,
           accountId: job.accountId,
+          pageId: job.pageId ?? null,
+          pageName: job.pageName ?? null,
           attemptNumber,
           responseData,
         });
@@ -334,7 +371,8 @@ export class QueueService {
         await prisma.postTarget.updateMany({
           where: {
             postId: job.postId,
-            accountId: job.accountId
+            accountId: job.accountId,
+            pageId: job.pageId ?? null,
           },
           data: {
             status: 'failed',
@@ -364,6 +402,8 @@ export class QueueService {
           jobId: job.id,
           postId: job.postId,
           accountId: job.accountId,
+          pageId: job.pageId ?? null,
+          pageName: job.pageName ?? null,
           attemptNumber,
           errorCode: 'FACEBOOK_VIDEO_NEEDS_VERIFICATION',
           errorMessage: verificationMessage,

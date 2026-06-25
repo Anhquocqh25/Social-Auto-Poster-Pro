@@ -9,7 +9,7 @@ import { Calendar, Clock, Hash, Save, Send, Upload, X } from 'lucide-react';
 import { getElectronAPI } from '@/lib/electronApi';
 import { t } from '@/lib/i18n';
 import { useLanguageStore } from '@/store/useLanguageStore';
-import type { FacebookPageTargetOption } from '@/types/electron';
+import type { FacebookPageTargetOption, PostTargetPageSnapshot } from '@/types/electron';
 
 function maskIdentifier(value: string | null | undefined) {
   if (!value) {
@@ -34,6 +34,10 @@ function getAvatarFallback(name: string | null | undefined) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
+}
+
+function getFacebookTargetKey(page: Pick<FacebookPageTargetOption, 'sourceAccountId' | 'pageId'>) {
+  return `${page.sourceAccountId}:${page.pageId}`;
 }
 
 export function CreatePostPage() {
@@ -70,7 +74,7 @@ export function CreatePostPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [facebookPages, setFacebookPages] = useState<FacebookPageTargetOption[]>([]);
-  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  const [selectedTargetKeys, setSelectedTargetKeys] = useState<string[]>([]);
   const [realPublishingEnabled, setRealPublishingEnabled] = useState<boolean | undefined>(undefined);
   const [publishingModeStatus, setPublishingModeStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
   const [videoConfirmModalOpen, setVideoConfirmModalOpen] = useState(false);
@@ -225,7 +229,7 @@ export function CreatePostPage() {
   };
 
   const getSelectedPages = () => {
-    return facebookPages.filter((page) => selectedPageIds.includes(page.pageId));
+    return facebookPages.filter((page) => selectedTargetKeys.includes(getFacebookTargetKey(page)));
   };
 
   const getTargetAccounts = () => {
@@ -309,7 +313,7 @@ export function CreatePostPage() {
         const pageData = await electronAPI.accounts.listFacebookPageTargets();
 
         setFacebookPages(pageData);
-        setSelectedPageIds([]);
+        setSelectedTargetKeys([]);
       } catch (error) {
         setStatusMessage(
           error instanceof Error ? error.message : 'Failed to load available Facebook Pages'
@@ -334,8 +338,13 @@ export function CreatePostPage() {
     console.info('[CreatePostPage] bannerMode=%s', bannerMode);
   }, [publishingModeStatus, realPublishingEnabled]);
 
-  const togglePageSelection = (pageId: string) => {
-    setSelectedPageIds((prev) => (prev.includes(pageId) ? [] : [pageId]));
+  const togglePageSelection = (page: FacebookPageTargetOption) => {
+    const targetKey = getFacebookTargetKey(page);
+    setSelectedTargetKeys((prev) =>
+      prev.includes(targetKey)
+        ? prev.filter((key) => key !== targetKey)
+        : [...prev, targetKey]
+    );
   };
 
   const resetVideoConfirmation = () => {
@@ -370,6 +379,23 @@ export function CreatePostPage() {
     scheduledAt?: string
   ) => {
     const selectedPages = getSelectedPages();
+    const pageTargets: PostTargetPageSnapshot[] = selectedPages.map((page) => ({
+      platform: 'facebook',
+      targetType: 'page',
+      accountId: page.sourceAccountId,
+      pageId: page.pageId,
+      pageName: page.pageName ?? 'Unnamed Facebook Page',
+      sourceAccountName: page.sourceAccountName,
+    }));
+
+    console.info(
+      '[CreatePostPage] selectedTargets=%o',
+      pageTargets.map((target) => ({
+        accountId: target.accountId,
+        pageId: target.pageId,
+        pageName: target.pageName,
+      }))
+    );
 
     return {
       title: formData.title || undefined,
@@ -401,14 +427,7 @@ export function CreatePostPage() {
       status,
       scheduledAt,
       targetAccounts: getTargetAccounts(),
-      pageTargets: selectedPages.map((page) => ({
-        platform: 'facebook' as const,
-        targetType: 'page' as const,
-        pageId: page.pageId,
-        pageName: page.pageName ?? 'Unnamed Facebook Page',
-        sourceAccountId: page.sourceAccountId,
-        sourceAccountName: page.sourceAccountName,
-      })),
+      pageTargets,
     };
   };
 
@@ -1177,7 +1196,7 @@ export function CreatePostPage() {
               {hasPages ? (
                 <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
                   {facebookPages.map((page) => {
-                    const checked = selectedPageIds.includes(page.pageId);
+                    const checked = selectedTargetKeys.includes(getFacebookTargetKey(page));
 
                     return (
                       <label
@@ -1233,7 +1252,7 @@ export function CreatePostPage() {
                         <input
                           type="checkbox"
                           checked={checked}
-                          onChange={() => togglePageSelection(page.pageId)}
+                          onChange={() => togglePageSelection(page)}
                           className="mt-1"
                         />
                       </label>
