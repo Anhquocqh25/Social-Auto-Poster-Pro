@@ -2047,51 +2047,20 @@ function registerIpcHandlers() {
   const serializePost = async (post: any) => {
     const rawTargets = (post.postTargets as any[]) ?? [];
 
-    const serializedTargets = await Promise.all(
-      rawTargets.map(async (target) => {
-        const selectedPageSetting = await prisma.platformSetting.findUnique({
-          where: {
-            accountId_settingKey: {
-              accountId: target.accountId,
-              settingKey: 'facebook.selectedPage',
-            },
-          },
-        });
-
-        const selectedPageNameSetting = await prisma.platformSetting.findUnique({
-          where: {
-            accountId_settingKey: {
-              accountId: target.accountId,
-              settingKey: 'facebook.selectedPageName',
-            },
-          },
-        });
-
-        const selectedPageCategorySetting = await prisma.platformSetting.findUnique({
-          where: {
-            accountId_settingKey: {
-              accountId: target.accountId,
-              settingKey: 'facebook.selectedPageCategory',
-            },
-          },
-        });
-
-        return {
-          accountId: target.accountId,
-          platform: target.account?.platform ?? 'unknown',
-          accountName: target.account?.accountName ?? 'Unknown account',
-          accountPlatformId: target.account?.accountId ?? '',
-          targetType: selectedPageSetting?.settingValue ? 'page' : 'legacy_account',
-          pageId: selectedPageSetting?.settingValue ?? null,
-          pageName: selectedPageNameSetting?.settingValue ?? null,
-          pageCategory: selectedPageCategorySetting?.settingValue ?? null,
-          sourceAccountName: target.account?.accountName ?? null,
-          platformPostId: target.platformPostId ?? null,
-          targetStatus: target.status ?? 'pending',
-          targetErrorMessage: target.errorMessage ?? null,
-        };
-      })
-    );
+    const serializedTargets = rawTargets.map((target) => ({
+      accountId: target.accountId,
+      platform: target.account?.platform ?? 'unknown',
+      accountName: target.account?.accountName ?? 'Unknown account',
+      accountPlatformId: target.account?.accountId ?? '',
+      targetType: target.targetType ?? 'legacy_account',
+      pageId: target.pageId ?? null,
+      pageName: target.pageName ?? null,
+      pageCategory: null,
+      sourceAccountName: target.sourceAccountName ?? null,
+      platformPostId: target.platformPostId ?? null,
+      targetStatus: target.status ?? 'pending',
+      targetErrorMessage: target.errorMessage ?? null,
+    }));
 
     const jobs = await prisma.publishJob.findMany({
       where: {

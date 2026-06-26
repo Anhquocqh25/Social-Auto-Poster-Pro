@@ -191,6 +191,9 @@ export interface PostTargetSnapshot {
   pageName?: string | null;
   pageCategory?: string | null;
   sourceAccountName?: string | null;
+  platformPostId?: string | null;
+  targetStatus?: string | null;
+  targetErrorMessage?: string | null;
 }
 
 export interface PostSnapshot {

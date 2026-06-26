@@ -34,6 +34,13 @@ import {
   buildEditableFacebookPageTargets,
   getUniqueTargetAccountsFromPageTargets,
 } from '@/lib/facebookPageTargetRouting';
+import {
+  formatPersistedPageTargetLabel,
+  getPersistedPageTargets,
+  getPostTargetSummaryLabel,
+  maskPostTargetIdentifier,
+  replacePostSnapshotInList,
+} from '@/lib/postTargetDisplay';
 import { t } from '@/lib/i18n';
 import { useLanguageStore } from '@/store/useLanguageStore';
 
@@ -115,18 +122,6 @@ interface PersistedBulkProgressSnapshot {
   cancelledCount: number;
   results: PersistedBulkProgressRow[];
   executionMode: 'queue_backed_controlled_publish';
-}
-
-function maskIdentifier(value: string | null | undefined, language: 'vi' | 'en' = 'en') {
-  if (!value) {
-    return language === 'vi' ? 'Không rõ' : 'Unknown';
-  }
-
-  if (value.length <= 6) {
-    return `••${value.slice(-2)}`;
-  }
-
-  return `${value.slice(0, 2)}••••${value.slice(-4)}`;
 }
 
 function getPostMediaPreviewSrc(post: PostSnapshot): string | null {
@@ -321,8 +316,7 @@ export function PostsPage() {
 
   const filteredPosts = useMemo(() => {
     return posts.filter((post) => {
-      const primaryTarget = getPrimaryTarget(post);
-      const targetText = primaryTarget?.pageName ?? primaryTarget?.accountName ?? '';
+      const targetText = getPostTargetSummaryLabel(post.postTargets, language);
 
       const matchesSearch =
         (post.title ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -667,6 +661,7 @@ export function PostsPage() {
       setStatusMessage(result.message);
       if (result.post) {
         setSelectedPost(result.post);
+        setPosts((currentPosts) => replacePostSnapshotInList(currentPosts, result.post as PostSnapshot));
         populateEditForm(result.post);
       }
       await loadPosts();
@@ -777,6 +772,7 @@ export function PostsPage() {
       });
 
       setSelectedPost(updated);
+      setPosts((currentPosts) => replacePostSnapshotInList(currentPosts, updated));
       setEditMode(false);
       setStatusMessage(
         language === 'vi'
@@ -1222,9 +1218,17 @@ export function PostsPage() {
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-[18px] border border-[#e6edf8] bg-white p-3">
                   <p className="text-sm text-muted-foreground">{language === 'vi' ? 'Kênh / Trang đích' : 'Target channel / Page'}</p>
-                  <p className="mt-1 text-sm font-medium">
-                    {selectedPrimaryTarget?.pageName ?? selectedPrimaryTarget?.accountName ?? (language === 'vi' ? 'Không rõ' : 'Unknown')}
-                  </p>
+                  <div className="mt-1 text-sm font-medium space-y-1">
+                    {getPersistedPageTargets(selectedPost.postTargets).length > 0 ? (
+                      getPersistedPageTargets(selectedPost.postTargets).map((target) => (
+                        <p key={`${target.accountId}:${target.pageId ?? 'unknown'}`}>
+                          {formatPersistedPageTargetLabel(target)}
+                        </p>
+                      ))
+                    ) : (
+                      <p>{selectedPrimaryTarget?.accountName ?? (language === 'vi' ? 'Không rõ' : 'Unknown')}</p>
+                    )}
+                  </div>
                 </div>
                 <div className="rounded-[18px] border border-[#e6edf8] bg-white p-3">
                   <p className="text-sm text-muted-foreground">{language === 'vi' ? 'Tài khoản nguồn' : 'Source Account'}</p>
@@ -1236,7 +1240,7 @@ export function PostsPage() {
                   <p className="text-sm text-muted-foreground">{language === 'vi' ? 'Mã ngoài an toàn' : 'Safe external ID'}</p>
                   <p className="mt-1 text-sm">
                     {selectedPlatformPostId
-                      ? maskIdentifier(selectedPlatformPostId, language)
+                      ? maskPostTargetIdentifier(selectedPlatformPostId)
                       : language === 'vi'
                         ? 'Chưa có'
                         : 'Not available'}
@@ -2060,7 +2064,7 @@ export function PostsPage() {
                         <div>
                           <span className="font-medium text-foreground">{language === 'vi' ? 'Kênh đích:' : 'Target channel:'}</span>{' '}
                           {primaryTarget?.targetType === 'page'
-                            ? `${primaryTarget.pageName ?? (language === 'vi' ? 'Kênh Facebook đã chọn' : 'Selected Facebook channel')} · ${maskIdentifier(primaryTarget.pageId)}`
+                            ? getPostTargetSummaryLabel(post.postTargets, language)
                             : primaryTarget
                               ? `${language === 'vi' ? 'Đích tài khoản cũ' : 'Legacy account target'} · ${primaryTarget.accountName}`
                               : language === 'vi' ? 'Đích không rõ' : 'Unknown target'}

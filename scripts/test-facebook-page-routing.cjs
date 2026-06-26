@@ -4,9 +4,9 @@ const vm = require('vm');
 const ts = require('typescript');
 const assert = require('assert');
 
-function loadHelperModule() {
-  const helperPath = path.join(process.cwd(), 'src/lib/facebookPageTargetRouting.ts');
-  const source = fs.readFileSync(helperPath, 'utf8');
+function loadTypeScriptModule(relativePath) {
+  const modulePath = path.join(process.cwd(), relativePath);
+  const source = fs.readFileSync(modulePath, 'utf8');
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -19,15 +19,28 @@ function loadHelperModule() {
   const context = vm.createContext({
     module,
     exports: module.exports,
-    require,
+    require: (request) => {
+      if (request === '@/types/electron') {
+        return {};
+      }
+      return require(request);
+    },
     console,
     process,
-    __dirname: path.dirname(helperPath),
-    __filename: helperPath,
+    __dirname: path.dirname(modulePath),
+    __filename: modulePath,
   });
 
-  new vm.Script(transpiled.outputText, { filename: helperPath }).runInContext(context);
+  new vm.Script(transpiled.outputText, { filename: modulePath }).runInContext(context);
   return module.exports;
+}
+
+function loadHelperModule() {
+  return loadTypeScriptModule('src/lib/facebookPageTargetRouting.ts');
+}
+
+function loadPostTargetDisplayModule() {
+  return loadTypeScriptModule('src/lib/postTargetDisplay.ts');
 }
 
 function readProjectFile(relativePath) {
@@ -59,6 +72,7 @@ function normalizeTargets(targets) {
 
 function run() {
   const helper = loadHelperModule();
+  const postTargetDisplay = loadPostTargetDisplayModule();
 
   const pageA = {
     sourceAccountId: 101,
@@ -516,6 +530,186 @@ function run() {
     mainSource,
     "throw new Error('Invalid Facebook target: pageId is required.')",
     'Electron IPC must validate missing pageId'
+  );
+
+  const accountDefaultPage = {
+    pageId: 'PAGE_A',
+    pageName: 'Default Page A',
+  };
+
+  const persistedPostTarget = {
+    accountId: 101,
+    platform: 'facebook',
+    accountName: 'Account One',
+    accountPlatformId: 'acc_one',
+    targetType: 'page',
+    pageId: 'PAGE_B',
+    pageName: 'Persisted Page B',
+    sourceAccountName: 'Account One',
+    platformPostId: 'PAGE_B_REMOTE_POST',
+  };
+
+  const serializedPersistedTarget = {
+    accountId: persistedPostTarget.accountId,
+    targetType: persistedPostTarget.targetType,
+    pageId: persistedPostTarget.pageId,
+    pageName: persistedPostTarget.pageName,
+    sourceAccountName: persistedPostTarget.sourceAccountName,
+    platformPostId: persistedPostTarget.platformPostId,
+  };
+
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(serializedPersistedTarget)),
+    {
+      accountId: 101,
+      targetType: 'page',
+      pageId: 'PAGE_B',
+      pageName: 'Persisted Page B',
+      sourceAccountName: 'Account One',
+      platformPostId: 'PAGE_B_REMOTE_POST',
+    },
+    'Serializer contract must preserve persisted PAGE_B target fields exactly'
+  );
+
+  const persistedOnlyTargets = [persistedPostTarget];
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(postTargetDisplay.getPersistedPageTargets(persistedOnlyTargets))),
+    [persistedPostTarget],
+    'Persisted page target filtering must preserve PAGE_B exactly'
+  );
+
+  const persistedPageBLabel = postTargetDisplay.formatPersistedPageTargetLabel(persistedPostTarget);
+
+  assert.strictEqual(
+    persistedPageBLabel,
+    'Persisted Page B · ••_B',
+    'Persisted PAGE_B label must use the masked persisted pageId contract'
+  );
+
+  assert.strictEqual(
+    postTargetDisplay.getPostTargetSummaryLabel(persistedOnlyTargets, 'en'),
+    persistedPageBLabel,
+    'List-card display must resolve to persisted Page B instead of the account default page'
+  );
+
+  assert.strictEqual(
+    postTargetDisplay.formatPersistedPageTargetLabel(persistedPostTarget),
+    persistedPageBLabel,
+    'Detail display must resolve to persisted Page B instead of the account default page'
+  );
+
+  const changedAccountDefaultPage = {
+    pageId: 'PAGE_C',
+    pageName: 'Default Page C',
+  };
+
+  assert.notDeepStrictEqual(
+    changedAccountDefaultPage,
+    accountDefaultPage,
+    'Fixture must model a changed account default page'
+  );
+  assert.strictEqual(
+    postTargetDisplay.getPostTargetSummaryLabel(persistedOnlyTargets, 'en'),
+    persistedPageBLabel,
+    'Changing the account default page must not change the displayed persisted Page B target'
+  );
+
+  assert.strictEqual(
+    postTargetDisplay.formatPersistedPageTargetLabel({
+      pageId: 'PAGE_B',
+      pageName: null,
+    }),
+    '••_B',
+    'Missing pageName may fall back to the masked persisted pageId'
+  );
+
+  assert.strictEqual(
+    postTargetDisplay.getPostTargetSummaryLabel(
+      [
+        persistedPostTarget,
+        {
+          accountId: 101,
+          platform: 'facebook',
+          accountName: 'Account One',
+          accountPlatformId: 'acc_one',
+          targetType: 'legacy_account',
+          pageId: null,
+          pageName: null,
+          sourceAccountName: 'Account One',
+        },
+      ],
+      'en'
+    ),
+    persistedPageBLabel,
+    'Account name must not be used when a persisted page target exists'
+  );
+
+  assert.strictEqual(
+    postTargetDisplay.getPostTargetSummaryLabel(
+      [
+        persistedPostTarget,
+        {
+          accountId: 101,
+          platform: 'facebook',
+          accountName: 'Account One',
+          accountPlatformId: 'acc_one',
+          targetType: 'page',
+          pageId: 'PAGE_D',
+          pageName: 'Persisted Page D',
+          sourceAccountName: 'Account One',
+          platformPostId: 'PAGE_D_REMOTE_POST',
+        },
+      ],
+      'en'
+    ),
+    `2 Pages: ${persistedPageBLabel}, ${postTargetDisplay.formatPersistedPageTargetLabel({
+      pageId: 'PAGE_D',
+      pageName: 'Persisted Page D',
+    })}`,
+    'Multiple persisted page targets must display all persisted targets safely'
+  );
+
+  const stalePosts = [
+    {
+      id: 77,
+      title: 'Stale post',
+      content: 'content',
+      mediaType: 'photo',
+      mediaUrl: null,
+      mediaLocalPath: null,
+      mediaFileName: null,
+      mediaFileSize: null,
+      mediaMimeType: null,
+      mediaExtension: null,
+      mediaDurationMs: null,
+      hashtags: null,
+      status: 'published',
+      scheduledAt: null,
+      publishedAt: null,
+      errorMessage: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      postTargets: [
+        {
+          ...persistedPostTarget,
+          pageName: 'Stale Default Page A',
+          pageId: 'PAGE_A',
+        },
+      ],
+    },
+  ];
+
+  const refreshedPost = {
+    ...stalePosts[0],
+    updatedAt: '2026-01-02T00:00:00.000Z',
+    postTargets: [persistedPostTarget],
+  };
+
+  const replacedPosts = postTargetDisplay.replacePostSnapshotInList(stalePosts, refreshedPost);
+  assert.strictEqual(
+    postTargetDisplay.getPostTargetSummaryLabel(replacedPosts[0].postTargets, 'en'),
+    persistedPageBLabel,
+    'A refreshed snapshot must replace an older stale label'
   );
 
   console.log('facebook-page-routing: PASS');
